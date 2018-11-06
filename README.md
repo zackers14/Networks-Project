@@ -2,7 +2,7 @@
 
 ## Reverse Proxy Steps
  1. Open on 1 port (2352) "Welcome Socket"
- 2. Receive UDP "Hello Packet"
+ 2. Receive UDP "Hello Packet", save IP to confirm identity
  3. Responds with 3 randomized ports encrypted by shared secret
  4. Receives UDP packets at those ports in sequence
     1. If out of sequence, close ports and send failure message
