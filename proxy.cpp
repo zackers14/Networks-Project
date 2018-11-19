@@ -6,11 +6,11 @@
 #include <string>
 #include <stdlib.h>             // Needed for exit() 
 #include <unordered_map>        // data structure keeping track of IPs
-#include <math.h>
-#include <vector>
-#include <iostream>
-#include <sstream>
-#include <cstdint>
+#include <math.h>               // Used in Diffie-Hellman calculations
+#include <vector>               // Convenient container
+#include <iostream>             // cout, cin
+#include <sstream>              // Convenient type conversions
+#include <cstdint>              // 
 #ifdef WIN  
     #include <process.h>        // for threads
     #include <stddef.h>         // for threads
@@ -60,7 +60,7 @@ struct connection_info {    // Needed to pass multiple args to new thread
 };
 
 //----- Global variables ----------------------------------------------------
-unordered_map<int, int> ip_addresses;
+unordered_map<char *, int> ip_addresses;
 unordered_map<int, int> ports_in_use;
 
 //===== Main program ========================================================
@@ -107,13 +107,13 @@ int main()
         exit(-1);
     }
 
-    printf("Listening on port %d\n", PORT_NUM);
+    printf(">>> Listening on port %d <<<\n", PORT_NUM);
     if (listen(server_s, 100) < 0) {
         perror("listen");
         exit(EXIT_FAILURE);
     }
 
-    // accept loop
+    // Accept loop
     while (1) 
     {
         addr_len = sizeof(client_addr);
@@ -132,9 +132,9 @@ int main()
         ntohs(client_addr.sin_port));
 		
 		connection_info *thread_args = new connection_info(server_s, client_s, client_addr);
-        
-        // if (ip_verified(client_addr))
-        if (1) {
+
+        if (ip_verified(client_ip_addr))
+        {
         #ifdef WIN
             if (_beginthread(handle_connection, 4096, (void *)(intptr_t)client_s) < 0)
         #endif
@@ -166,6 +166,7 @@ void handle_connection(void *in_args)
 void *handle_connection(void *in_args)
 #endif
 {
+    char out_buf[4096];
 	int client_s = (intptr_t)in_args;
 	
     // make unique shared secret
@@ -201,6 +202,8 @@ void *handle_connection(void *in_args)
         if (!create_knock_socket(port)) // knock failed
         {
             // send failure mesasage, close socket, terminate thread
+            strcpy(out_buf, "Knock failed\n");
+            send(client_s, out_buf, (strlen(out_buf) + 1), 0);
         #ifdef WIN
             closesocket(client_s);
             _endthread();
@@ -216,30 +219,41 @@ void *handle_connection(void *in_args)
 
 }
 
-/* DoS defense: Checks if sender is trying to flood the server */
+/* DoS defense: Checks if client is trying to flood the server.
+ * Increments entry for client ip every time they connect.
+ * Should add timing mechanism which removes IPs after certain time to avoid 
+ * blocking hosts unnecessarily */
 bool ip_verified(in_addr client_ip)
 {
-    // if ip not in map, add ip to map, return true
-    // if ip is in map and has > certain # of pings
-    // return false
-    // else increment ip entry, return true
-    return true;
+    char * ip = inet_ntoa(client_ip);
+    if (ip_addresses.find(ip) == ip_addresses.end())
+    {
+        ip_addresses[ip] = 1;
+    } 
+    else
+    {
+        ip_addresses[ip]++;
+    }
+    cout << inet_ntoa(client_ip) << ": " << ip_addresses[ip] << endl;
+    return (ip_addresses[ip] < 5);
 }
 
 /* Uses Diffie-Hellman algorithm to create shared secret */
 long long int create_shared_secret(int client_s)
 {
-    char                in_buf[4096];
-    int a = rand() % 20 + 1; 
+    char in_buf[4096];
+    int retcode;
+    int a = rand() % 20 + 1;    // arbitrary number
     long long int x = power(DIFFIE_G, a);
     long long int y;
     stringstream stream;
+    
     stream << x;
     string packet = stream.str();
     const char * c_pkt = packet.c_str();
     
     // Send x
-    int retcode = send(client_s, c_pkt, strlen(c_pkt), 0);
+    retcode = send(client_s, c_pkt, strlen(c_pkt), 0);
     if(retcode < 0)
     {
         printf("*** ERROR - send() failed \n");
