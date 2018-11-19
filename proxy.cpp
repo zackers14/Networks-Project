@@ -10,6 +10,7 @@
 #include <vector>
 #include <iostream>
 #include <sstream>
+#include <cstdint>
 #ifdef WIN  
     #include <process.h>        // for threads
     #include <stddef.h>         // for threads
@@ -36,7 +37,7 @@ using namespace std;
 bool            ip_verified(in_addr client_ip);
 bool            create_knock_socket(int port_num);
 vector<int>     generate_knock_sequence();
-long long int   create_shared_secret(struct connection_info* conn);
+long long int   create_shared_secret(int client_s);
 long long int   power(long long int a, long long int b);
 #ifdef WIN
 void            handle_connection(void *in_arg);
@@ -86,7 +87,7 @@ int main()
 #endif
 
     // Create server socket
-    server_s = socket(AF_INET, SOCK_DGRAM, 0);
+    server_s = socket(AF_INET, SOCK_STREAM, 0);
     if (server_s < 0)
     {
         printf("*** ERROR - socket() failed \n");
@@ -97,6 +98,7 @@ int main()
     server_addr.sin_family = AF_INET;                 // Address family to use
     server_addr.sin_port = htons(PORT_NUM);
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
     retcode = bind(server_s, (struct sockaddr *)&server_addr,
         sizeof(server_addr));
     if (retcode < 0)
@@ -105,16 +107,20 @@ int main()
         exit(-1);
     }
 
-    // recvfrom loop
+    printf("Listening on port %d\n", PORT_NUM);
+    if (listen(server_s, 100) < 0) {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+
+    // accept loop
     while (1) 
     {
-        printf("Waiting for connection... \n");
         addr_len = sizeof(client_addr);
-        retcode = recvfrom(server_s, in_buf, sizeof(in_buf), 0,
-            (struct sockaddr *)&client_addr, &addr_len);
-        if (retcode < 0)
+        client_s = accept(server_s, (struct sockaddr *)&client_addr, &addr_len);
+        if (client_s == -1)
         {
-            printf("*** ERROR - recvfrom() failed \n");
+            printf("*** ERROR - Unable to create a socket \n");
             exit(-1);
         }
 
@@ -122,18 +128,18 @@ int main()
         memcpy(&client_ip_addr, &client_addr.sin_addr.s_addr, 4);
 
         // Print an informational message of IP address and port of the client
-        printf("IP address of client = %s  port = %d) \n", inet_ntoa(client_ip_addr),
+        printf("IP address of client = %s  port = %d\n", inet_ntoa(client_ip_addr),
         ntohs(client_addr.sin_port));
 		
-		connection_info thread_args = connection_info(server_s, client_s, client_addr);
+		connection_info *thread_args = new connection_info(server_s, client_s, client_addr);
         
         // if (ip_verified(client_addr))
         if (1) {
         #ifdef WIN
-            if (_beginthread(handle_connection, 4096, (void *) &thread_args) < 0)
+            if (_beginthread(handle_connection, 4096, (void *)(intptr_t)client_s) < 0)
         #endif
         #ifdef BSD
-            if (pthread_create(&thread_id, NULL, handle_connection, (void *) &thread_args) != 0)
+            if (pthread_create(&thread_id, NULL, handle_connection, (void *)client_s) != 0)
         #endif
             {
                 printf("ERROR - Unable to create a thread to handle client\n");
@@ -160,14 +166,11 @@ void handle_connection(void *in_args)
 void *handle_connection(void *in_args)
 #endif
 {
-	struct connection_info *connection = reinterpret_cast<struct connection_info *>(in_args);
-    int server_s = connection->server_socket;
-	int client_s = connection->client_socket;
-	struct sockaddr_in client_addr = connection->client_addr;
+	int client_s = (intptr_t)in_args;
 	
     // make unique shared secret
-    int key = create_shared_secret(connection);
-    
+    int key = create_shared_secret(client_s);
+    cout << key << endl;
     // create new random knock sequence
     vector<int> ports = generate_knock_sequence();
 
@@ -183,8 +186,8 @@ void *handle_connection(void *in_args)
 
 
     // send packet to client
-    int retcode = sendto(server_s, packet.c_str(), sizeof(packet), 0,
-        (struct sockaddr *)&client_addr, sizeof(client_addr));
+    const char * c_pkt = packet.c_str();
+    int retcode = send(client_s, c_pkt, strlen(c_pkt), 0);
     if (retcode < 0)
     {
         printf("*** ERROR - sendto() failed \n");
@@ -210,7 +213,7 @@ void *handle_connection(void *in_args)
     }
 
     // if all succeed, launch weblite, send client encrypted server port
-    
+
 }
 
 /* DoS defense: Checks if sender is trying to flood the server */
@@ -224,33 +227,35 @@ bool ip_verified(in_addr client_ip)
 }
 
 /* Uses Diffie-Hellman algorithm to create shared secret */
-long long int create_shared_secret(struct connection_info* conn)
+long long int create_shared_secret(int client_s)
 {
-    struct sockaddr_in client_addr = conn->client_addr; 
-    int server_s = conn->server_socket;
-
+    char                in_buf[4096];
     int a = rand() % 20 + 1; 
     long long int x = power(DIFFIE_G, a);
     long long int y;
+    stringstream stream;
+    stream << x;
+    string packet = stream.str();
+    const char * c_pkt = packet.c_str();
     
     // Send x
-    int retcode = sendto(server_s, (char*)x, sizeof(long long int), 0,
-        (struct sockaddr *)&client_addr, sizeof(client_addr));
-    if (retcode < 0)
+    int retcode = send(client_s, c_pkt, strlen(c_pkt), 0);
+    if(retcode < 0)
     {
-        printf("*** ERROR - sendto() failed \n");
+        printf("*** ERROR - send() failed \n");
         exit(-1);
     }
 
     // Receive y
-    int addr_len = sizeof(client_addr);
-    retcode = recvfrom(server_s, (char *)y, sizeof(long long int), 0,
-        (struct sockaddr *)&client_addr, &addr_len);
+    retcode = recv(client_s, in_buf, sizeof(in_buf), 0);
     if (retcode < 0)
     {
-        printf("*** ERROR - recvfrom() failed \n");
+        printf("*** ERROR - recv() failed \n");
         exit(-1);
     }
+    string reply(in_buf);
+    stream = stringstream(reply);
+    stream >> y;
 
     return power(y, a);
 }
