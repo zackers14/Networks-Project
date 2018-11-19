@@ -35,7 +35,7 @@ using namespace std;
 
 //----- Function prototypes -------------------------------------------------
 bool            ip_verified(in_addr client_ip);
-bool            create_knock_socket(int port_num);
+bool            create_knock_socket(sockaddr_in client, int key, int port_num);
 vector<int>     generate_knock_sequence();
 long long int   create_shared_secret(int client_s);
 long long int   power(long long int a, long long int b);
@@ -48,13 +48,11 @@ void*           handle_connection(void *in_arg);
 
 //----- Struct definitions --------------------------------------------------
 struct connection_info {    // Needed to pass multiple args to new thread
-	connection_info(int server_s, int client_s, struct sockaddr_in client_address)
+	connection_info(int client_s, struct sockaddr_in client_address)
 	{
-        server_socket = server_s;
-		client_socket = client_s;
-		client_addr = client_addr;
+		client_addr = client_address;
+	    client_socket = client_s;
 	}
-	int server_socket;
 	int client_socket;
 	struct sockaddr_in client_addr;
 };
@@ -64,7 +62,7 @@ unordered_map<char *, int> ip_addresses;
 unordered_map<int, int> ports_in_use;
 
 //===== Main program ========================================================
-int main()
+int main() // TODO: Command line args for 'verbose mode' and webserver file
 {
 #ifdef WIN
     WORD wVersionRequested = MAKEWORD(1,1);
@@ -131,12 +129,12 @@ int main()
         printf("IP address of client = %s  port = %d\n", inet_ntoa(client_ip_addr),
         ntohs(client_addr.sin_port));
 		
-		connection_info *thread_args = new connection_info(server_s, client_s, client_addr);
+		connection_info *thread_args = new connection_info(client_s, client_addr);
 
         if (ip_verified(client_ip_addr))
         {
         #ifdef WIN
-            if (_beginthread(handle_connection, 4096, (void *)(intptr_t)client_s) < 0)
+            if (_beginthread(handle_connection, 4096, (void *)thread_args) < 0)
         #endif
         #ifdef BSD
             if (pthread_create(&thread_id, NULL, handle_connection, (void *)client_s) != 0)
@@ -157,8 +155,7 @@ int main()
     }
 }
 
-/* Thread process handles knocking for one client, 
- * grants webserver access if successful */
+/* Handles knocking for one client, grants webserver access if successful */
 #ifdef WIN
 void handle_connection(void *in_args)
 #endif
@@ -167,15 +164,19 @@ void *handle_connection(void *in_args)
 #endif
 {
     char out_buf[4096];
-	int client_s = (intptr_t)in_args;
+
+	struct connection_info *conn = 
+        reinterpret_cast<struct connection_info *>(in_args);
+	int client_s = conn->client_socket;
+    struct sockaddr_in client_addr = conn->client_addr;
 	
-    // make unique shared secret
+    // Make unique shared secret
     int key = create_shared_secret(client_s);
-    cout << key << endl;
-    // create new random knock sequence
+    cout << key << endl; // TODO: print for testing purposes
+    // Create new random knock sequence
     vector<int> ports = generate_knock_sequence();
 
-    // create a packet for knocks
+    // Create a packet for knocks
     std::stringstream stream;
     for (int i = 0; i < 3; i++)
     {
@@ -183,10 +184,10 @@ void *handle_connection(void *in_args)
     }
     string packet = stream.str();
     
-    // encrypt packet using key
+    // TODO: Encrypt packet using key
 
 
-    // send packet to client
+    // Send packet to client
     const char * c_pkt = packet.c_str();
     int retcode = send(client_s, c_pkt, strlen(c_pkt), 0);
     if (retcode < 0)
@@ -195,11 +196,13 @@ void *handle_connection(void *in_args)
         exit(-1);
     }
     
-    // call create_knock_socket for each port
-    // *must be changed to sequential implementation
+    // TODO: change to parallel implementation after tests
+    // TODO: need a timer to refresh when a knock occurs
+    // TODO: need way to measure if ports knocked out of order
+    // Call create_knock_socket for each port
     for(int port : ports)
     {
-        if (!create_knock_socket(port)) // knock failed
+        if (!create_knock_socket(client_addr, key, port)) // knock failed
         {
             // send failure mesasage, close socket, terminate thread
             strcpy(out_buf, "Knock failed\n");
@@ -215,7 +218,7 @@ void *handle_connection(void *in_args)
         }
     }
 
-    // if all succeed, launch weblite, send client encrypted server port
+    // TODO: if all succeed, launch weblite, send client encrypted server port
 
 }
 
@@ -234,8 +237,8 @@ bool ip_verified(in_addr client_ip)
     {
         ip_addresses[ip]++;
     }
-    cout << inet_ntoa(client_ip) << ": " << ip_addresses[ip] << endl;
-    return (ip_addresses[ip] < 5);
+    cout << "# Connect Attempts: " << ip_addresses[ip] << endl;
+    return (ip_addresses[ip] < 5); // TODO: Turn into a constant
 }
 
 /* Uses Diffie-Hellman algorithm to create shared secret */
@@ -284,16 +287,79 @@ vector<int> generate_knock_sequence()
         // check that port isn't in use already
         if (ports_in_use.find(port) == ports_in_use.end()) {
             ports.push_back(port);
+            ports_in_use[port] = 1;
         }
     }
     return ports;
 }
 
 /* Creates new UDP socket listening on port_num for a knock */
-bool create_knock_socket(int port_num)
+bool create_knock_socket(sockaddr_in client, int key, int port_num)
 {
-    // recvfrom needs a timeout
-    // once socket is closed, remove port from global port map (if implementing that)
+    int retcode;
+    int server_s;
+    int client_s;
+    int addr_len;
+    char out_buf[4096];
+    char in_buf[4096];
+    struct in_addr client_ip_addr;
+    struct sockaddr_in server_addr;
+    struct sockaddr_in client_addr;
+    struct sockaddr_in old_client = client;
+
+    //=== TEST ==================================================
+    memcpy(&client_ip_addr, &old_client.sin_addr.s_addr, 4);
+    printf("Original client IP = %s  port = %d \n", 
+        inet_ntoa(client_ip_addr), ntohs(old_client.sin_port));
+    //===========================================================
+
+    server_s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (server_s < 0)
+    {
+        printf("*** ERROR - socket() failed \n");
+        exit(-1);
+    }
+
+    server_addr.sin_family = AF_INET;                 // Address family to use
+    server_addr.sin_port = htons(port_num);           // Port number to use
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);  // Listen on any IP address
+    retcode = bind(server_s, (struct sockaddr *)&server_addr,
+        sizeof(server_addr));
+    if (retcode < 0)
+    {
+        printf("*** ERROR - bind() failed \n");
+        exit(-1);
+    }
+
+    printf("Waiting for knock on port %d \n", port_num);
+    addr_len = sizeof(client_addr);
+    retcode = recvfrom(server_s, in_buf, sizeof(in_buf), 0,
+        (struct sockaddr *)&client_addr, &addr_len);
+    if (retcode < 0)
+    {
+        printf("*** ERROR - recvfrom() failed \n");
+        exit(-1);
+    }
+
+#ifdef WIN
+    closesocket(server_s);
+#endif
+#ifdef BSD
+    close(server_s);
+#endif
+
+    // Erase port from port map;
+    ports_in_use.erase(port_num);
+
+    // Copy the four-byte client IP address into an IP address structure
+    memcpy(&client_ip_addr, &client_addr.sin_addr.s_addr, 4);
+
+    // Print an informational message of IP address and port of the client
+    printf("IP address of knock = %s  port = %d \n", 
+        inet_ntoa(client_ip_addr), ntohs(client_addr.sin_port));
+
+    // TODO: if decrypted packet matches port number, return true, else false 
+
     return true;
 }
 
