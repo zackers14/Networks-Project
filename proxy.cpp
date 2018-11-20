@@ -341,6 +341,12 @@ bool create_knock_socket(sockaddr_in client, int key, int port_num)
         exit(-1);
     }
 
+    memcpy(&client_ip_addr, &client_addr.sin_addr.s_addr, 4);
+    printf("IP address of knock = %s  port = %d \n", 
+        inet_ntoa(client_ip_addr), ntohs(client_addr.sin_port));
+
+    // TODO: If decrypted packet matches port number, return true, else false 
+    // TODO: Send appropriate response message (necessary?)
 #ifdef WIN
     closesocket(server_s);
 #endif
@@ -348,17 +354,7 @@ bool create_knock_socket(sockaddr_in client, int key, int port_num)
     close(server_s);
 #endif
 
-    // Erase port from port map;
     ports_in_use.erase(port_num);
-
-    // Copy the four-byte client IP address into an IP address structure
-    memcpy(&client_ip_addr, &client_addr.sin_addr.s_addr, 4);
-
-    // Print an informational message of IP address and port of the client
-    printf("IP address of knock = %s  port = %d \n", 
-        inet_ntoa(client_ip_addr), ntohs(client_addr.sin_port));
-
-    // TODO: if decrypted packet matches port number, return true, else false 
 
     return true;
 }
