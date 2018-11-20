@@ -6,6 +6,7 @@
 #include <string>
 #include <stdlib.h>             // Needed for exit() 
 #include <unordered_map>        // data structure keeping track of IPs
+#include <set>                  // data structure keeping track of ports
 #include <math.h>               // Used in Diffie-Hellman calculations
 #include <vector>               // Convenient container
 #include <iostream>             // cout, cin
@@ -59,7 +60,7 @@ struct connection_info {    // Needed to pass multiple args to new thread
 
 //----- Global variables ----------------------------------------------------
 unordered_map<char *, int> ip_addresses;
-unordered_map<int, int> ports_in_use;
+set<int> ports_in_use;
 
 //===== Main program ========================================================
 int main() // TODO: Command line args for 'verbose mode' and webserver file
@@ -287,7 +288,7 @@ vector<int> generate_knock_sequence()
         // check that port isn't in use already
         if (ports_in_use.find(port) == ports_in_use.end()) {
             ports.push_back(port);
-            ports_in_use[port] = 1;
+            ports_in_use.insert(port);
         }
     }
     return ports;
