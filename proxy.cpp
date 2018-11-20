@@ -10,7 +10,7 @@
 #include <stdio.h>              // Needed for printf()
 #include <string.h>             // Needed for memcpy() and strcpy
 #include <string>
-#include <stdlib.h>             // Needed for exit() 
+#include <cstdlib>             // Needed for exit() 
 #include <unordered_map>        // data structure keeping track of IPs
 #include <set>                  // data structure keeping track of ports
 #include <math.h>               // Used in Diffie-Hellman calculations
@@ -18,6 +18,7 @@
 #include <iostream>             // cout, cin
 #include <sstream>              // Convenient type conversions
 #include <cstdint>              // 
+#include <ctime>               // time() used as seed for rand()
 #ifdef WIN  
     #include <process.h>        // for threads
     #include <stddef.h>         // for threads
@@ -35,8 +36,8 @@
 
 //----- Defines -------------------------------------------------------------
 #define PORT_NUM 2352			// arbitrary port number	
-#define DIFFIE_P 1234567891 	// arbitrary large number
-#define DIFFIE_G 177        	// arbitrary smaller number
+#define DIFFIE_P 47          	// arbitrary "large" number
+#define DIFFIE_G 7           	// arbitrary smaller number
 
 using namespace std;
 
@@ -179,7 +180,7 @@ void *handle_connection(void *in_args)
 	
     // Make unique shared secret
     int key = create_shared_secret(client_s);
-    cout << key << endl; // TODO: print for testing purposes
+    cout << "Key: " << key << endl; // TODO: print for testing purposes
     // Create new random knock sequence
     vector<int> ports = generate_knock_sequence();
 
@@ -196,7 +197,7 @@ void *handle_connection(void *in_args)
 
     // Send packet to client
     const char * c_pkt = packet.c_str();
-    int retcode = send(client_s, c_pkt, strlen(c_pkt), 0);
+    int retcode = send(client_s, c_pkt, (strlen(c_pkt) + 1), 0);
     if (retcode < 0)
     {
         printf("*** ERROR - sendto() failed \n");
@@ -247,9 +248,11 @@ bool ip_verified(in_addr client_ip)
 /* Uses Diffie-Hellman algorithm to create shared secret */
 long long int create_shared_secret(int client_s)
 {
+    srand(time(0)); 
+
     char in_buf[4096];
     int retcode;
-    int a = rand() % 20 + 1;    // arbitrary number
+    int a = rand() % 11 + 1;    // arbitrary number
     long long int x = power(DIFFIE_G, a); // x = G^a mod P
     long long int y;
     stringstream stream;
@@ -259,7 +262,7 @@ long long int create_shared_secret(int client_s)
     const char * c_pkt = packet.c_str();
     
     // Send x
-    retcode = send(client_s, c_pkt, strlen(c_pkt), 0);
+    retcode = send(client_s, c_pkt, (strlen(c_pkt) + 1), 0);
     if(retcode < 0)
     {
         printf("*** ERROR - send() failed \n");
@@ -305,16 +308,11 @@ bool create_knock_socket(sockaddr_in client, int key, int port_num)
     int addr_len;
     char out_buf[4096];
     char in_buf[4096];
+    bool success;
     struct in_addr client_ip_addr;
     struct sockaddr_in server_addr;
     struct sockaddr_in client_addr;
     struct sockaddr_in old_client = client;
-
-    //=== TEST ==================================================
-    memcpy(&client_ip_addr, &old_client.sin_addr.s_addr, 4);
-    printf("Original client IP = %s  port = %d \n", 
-        inet_ntoa(client_ip_addr), ntohs(old_client.sin_port));
-    //===========================================================
 
     server_s = socket(AF_INET, SOCK_DGRAM, 0);
     if (server_s < 0)
@@ -348,8 +346,31 @@ bool create_knock_socket(sockaddr_in client, int key, int port_num)
     printf("IP address of knock = %s  port = %d \n", 
         inet_ntoa(client_ip_addr), ntohs(client_addr.sin_port));
 
-    // TODO: If decrypted packet matches port number, return true, else false 
-    // TODO: Send appropriate response message (necessary?)
+    // TODO: Decrypt packet
+    string port_pkt(in_buf);
+
+    // If packet == port number, set success = true, else false;
+    success = (stoi(port_pkt) == port_num) ? true : false;
+
+    // TODO: Send appropriate response message (binary to test)
+    if(success)
+    {
+        strcpy(out_buf, "1");
+    }   
+    else
+    {
+        strcpy(out_buf, "0");
+    }
+    
+    // Send knock packet to port
+    retcode = sendto(server_s, out_buf, (strlen(out_buf) + 1), 0,
+        (struct sockaddr *)&client_addr, sizeof(client_addr));
+    if (retcode < 0)
+    {
+        printf("*** ERROR - sendto() failed \n");
+        exit(-1);
+    }
+
 #ifdef WIN
     closesocket(server_s);
 #endif
@@ -359,7 +380,7 @@ bool create_knock_socket(sockaddr_in client, int key, int port_num)
 
     ports_in_use.erase(port_num);
 
-    return true;
+    return success;
 }
 
 /* Power function to return value of a ^ b mod P */
@@ -368,5 +389,5 @@ long long int power(long long int a, long long int b)
     if (b == 1) 
         return a;
     else
-        return (((long long int)pow(a, b)) % DIFFIE_P);
-} 
+        return (((unsigned long long int)pow(a, b)) % DIFFIE_P);
+}
