@@ -1,3 +1,9 @@
+//============================================================================
+// --- Compilation notes ---
+// WIN: g++ proxy.cpp -lws2_32 -o proxy
+// BSD: g++ proxy.cpp -pthread -o proxy (needs verification)
+//============================================================================
+
 #define WIN
 
 //----- Include files --------------------------------------------------------
@@ -138,7 +144,7 @@ int main() // TODO: Command line args for 'verbose mode' and webserver file
             if (_beginthread(handle_connection, 4096, (void *)thread_args) < 0)
         #endif
         #ifdef BSD
-            if (pthread_create(&thread_id, NULL, handle_connection, (void *)client_s) != 0)
+            if (pthread_create(&thread_id, NULL, handle_connection, (void *)&thread_args) != 0)
         #endif
             {
                 printf("ERROR - Unable to create a thread to handle client\n");
@@ -224,22 +230,18 @@ void *handle_connection(void *in_args)
 }
 
 /* DoS defense: Checks if client is trying to flood the server.
- * Increments entry for client ip every time they connect.
- * Should add timing mechanism which removes IPs after certain time to avoid 
- * blocking hosts unnecessarily */
+ * Increments entry for client ip every time they connect. */
+// TODO: Should add timing mechanism which removes IPs after certain time 
+// to avoid blocking hosts unnecessarily
 bool ip_verified(in_addr client_ip)
 {
     char * ip = inet_ntoa(client_ip);
-    if (ip_addresses.find(ip) == ip_addresses.end())
-    {
-        ip_addresses[ip] = 1;
-    } 
-    else
-    {
-        ip_addresses[ip]++;
-    }
+    // if ip exists, add 1, otherwise set to 1
+    ip_addresses[ip] = (ip_addresses.find(ip) == ip_addresses.end()) 
+        ? 1 : ip_addresses[ip] + 1;
+
     cout << "# Connect Attempts: " << ip_addresses[ip] << endl;
-    return (ip_addresses[ip] < 5); // TODO: Turn into a constant
+    return (ip_addresses[ip] < 5); // TODO: Turn into a constant?
 }
 
 /* Uses Diffie-Hellman algorithm to create shared secret */
@@ -248,7 +250,7 @@ long long int create_shared_secret(int client_s)
     char in_buf[4096];
     int retcode;
     int a = rand() % 20 + 1;    // arbitrary number
-    long long int x = power(DIFFIE_G, a);
+    long long int x = power(DIFFIE_G, a); // x = G^a mod P
     long long int y;
     stringstream stream;
     
@@ -275,7 +277,7 @@ long long int create_shared_secret(int client_s)
     stream = stringstream(reply);
     stream >> y;
 
-    return power(y, a);
+    return power(y, a); // key = y^a mod P
 }
 
 /* Generates 3 random ports */
