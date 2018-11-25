@@ -1,4 +1,4 @@
-//====================================================== file = weblite.c =====
+//===================================================== file = weblite1.c =====
 //=  A super light-weight secure HTTP server                                  =
 //=   - Uses threads to allow for parallel connections                        =
 //=============================================================================
@@ -26,10 +26,10 @@
 //=      with the name of the file currently being sent.                      =
 //=---------------------------------------------------------------------------=
 //=  Build:                                                                   =
-//=    Windows (WIN):  Borland: bcc32 -WM weblite.c                           =
-//=                    MinGW: gcc weblite.c -lws2_32 -o weblite               =
-//=                    Visual C: cl /MT weblite.c wsock32.lib                 =
-//=    Unix/Mac (BSD): gcc weblite.c -lpthread -o weblite                     =
+//=    Windows (WIN):  Borland: bcc32 -WM weblite1.c                          =
+//=                    MinGW: gcc weblite1.c -lws2_32 -o weblite1             =
+//=                    Visual C: cl /MT weblite1.c wsock32.lib                =
+//=    Unix/Mac (BSD): gcc weblite1.c -lpthread -o weblite1                   =
 //=---------------------------------------------------------------------------=
 //=  Execute: weblite                                                         =
 //=---------------------------------------------------------------------------=
@@ -44,8 +44,9 @@
 //=            KJC (08/20/11) - Updated build instructions for gcc            =
 //=            KJC (09/17/13) - Removed broken security check, is non-secure  =
 //=            SD  (09/01/17) - Updated for building on a Mac                 =
+//=            KJC (11/20/18) - Modified for non image and text file type     =
 //=============================================================================
-#define  BSD              // WIN for Winsock and BSD for BSD sockets
+#define  WIN              // WIN for Winsock and BSD for BSD sockets
 
 //----- Include files ---------------------------------------------------------
 #include <stdio.h>        // Needed for printf()
@@ -74,6 +75,7 @@
 //----- HTTP response messages ----------------------------------------------
 #define OK_IMAGE  "HTTP/1.0 200 OK\r\nContent-Type:image/gif\r\n\r\n"
 #define OK_TEXT   "HTTP/1.0 200 OK\r\nContent-Type:text/html\r\n\r\n"
+#define OK_BINARY "HTTP/1.0 200 OK\r\nContent-Type:application/octet-strean\r\n\r\n"
 #define NOTOK_404 "HTTP/1.0 404 Not Found\r\nContent-Type:text/html\r\n\r\n"
 #define MESS_404  "<html><body><h1>FILE NOT FOUND</h1></body></html>"
 
@@ -249,8 +251,12 @@ void *handle_get(void *in_arg)
   printf("Sending file '%s' \n", &file_name[1]);
   if (strstr(file_name, ".gif") != NULL)
     strcpy(out_buf, OK_IMAGE);
-  else
+  else if (strstr(file_name, ".html") != NULL)
     strcpy(out_buf, OK_TEXT);
+  else if (strstr(file_name, ".txt") != NULL)
+    strcpy(out_buf, OK_TEXT);
+  else
+    strcpy(out_buf, OK_BINARY);
   send(client_s, out_buf, strlen(out_buf), 0);
   while(1)
   {

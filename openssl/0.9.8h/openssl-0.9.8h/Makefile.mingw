@@ -1,0 +1,34 @@
+export DEFSPLUS= 
+export INCLUDESPLUS=
+export CFLAGSPLUS=
+export LDFLAGSPLUS=
+export LIBSPLUS= 
+export DLLFLAG=
+sedfiles=Makefile libtool config.h
+BUILDDIR=$(shell pwd.sh)
+SRCDIR=../$(shell basename $(BUILDDIR)-src)
+
+.PHONY: all 
+all: CONF MFSED
+CONF:
+#	if [ -e Makefile.in.sed ]; then \
+#		find.exe $(SRCDIR) -iname Makefile.in -exec sed -i -f Makefile.in.sed '{}' ';' ; \
+#	fi
+	./configure --prefix=c:/progra~1/OpenSSL --openssldir=c:/progra~1/OpenSSL/share \
+		shared mingw 386 \
+ -O3 -Wall -D__GW32__ -D_LARGEFILE_SOURCE=1 -D_LARGEFILE64_SOURCE=1 \
+ -D_FILE_OFFSET_BITS=64 -DENABLE_RELOCATABLE \
+ -DL_ENDIAN -DDSO_WIN32 -fomit-frame-pointer -O3 -march=i486 -Wall -DBN_ASM \
+-DMD5_ASM -DSHA1_ASM -DOPENSSL_BN_ASM_PART_WORDS -DOPENSSL_NO_CAMELLIA -DOPENSSL_NO_SEED \
+-DOPENSSL_NO_RC5 -DOPENSSL_NO_MDC2 -DOPENSSL_NO_TLSEXT -DOPENSSL_NO_CMS -DOPENSSL_NO_KRB5 \
+-DOPENSSL_NO_DYNAMIC_ENGINE \
+ -Wall -O3 -fms-extensions -mms-bitfields -fno-exceptions -fomit-frame-pointer -march=i386 -mcpu=i686 -ffast-math \
+ -I$$(TOP)/outinc -ID:/progra~1/gnuwin32/include -Wl,-s -LD:/progra~1/gnuwin32/lib 
+
+ 
+-include $(DVLDIR)/makefile.chg
+
+#	make all
+#	make check
+#	make install prefix=c:/temp/sed
+                                 
