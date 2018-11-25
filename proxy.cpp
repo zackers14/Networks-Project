@@ -19,6 +19,13 @@
 #include <sstream>              // Convenient type conversions
 #include <cstdint>              // 
 #include <ctime>               // time() used as seed for rand()
+#include <openssl/conf.h>       // OpenSSL Configuration
+#include <openssl/evp.h>        // OpenSSL symmetric encrypt/decrypt
+#include <openssl/rand.h>       // For generating random nonce
+#include <openssl/err.h>        // OpenSSL Error handling
+#include <memory>
+#include <limits>
+#include <stdexcept>
 #ifdef WIN  
     #include <process.h>        // for threads
     #include <stddef.h>         // for threads
@@ -39,14 +46,15 @@
 #define DIFFIE_P 47          	// arbitrary "large" number
 #define DIFFIE_G 7           	// arbitrary smaller number
 
-using namespace std;
-
 //----- Function prototypes -------------------------------------------------
 bool            ip_verified(in_addr client_ip);
 bool            create_knock_socket(sockaddr_in client, int key, int port_num);
-vector<int>     generate_knock_sequence();
+std::vector<int>generate_knock_sequence();
 long long int   create_shared_secret(int client_s);
 long long int   power(long long int a, long long int b);
+void gen_params(byte key[KEY_SIZE], byte iv[BLOCK_SIZE]);
+void aes_encrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ptext, secure_string& ctext);
+void aes_decrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ctext, secure_string& rtext);
 #ifdef WIN
 void            handle_connection(void *in_arg);
 #endif
@@ -65,9 +73,80 @@ struct connection_info {    // Needed to pass multiple args to new thread
 	struct sockaddr_in client_addr;
 };
 
+// Template lifted from OpenSSL AES Encrypt/Decrypt example
+template <typename T>
+struct zallocator
+{
+public:
+    typedef T value_type;
+    typedef value_type* pointer;
+    typedef const value_type* const_pointer;
+    typedef value_type& reference;
+    typedef const value_type& const_reference;
+    typedef std::size_t size_type;
+    typedef std::ptrdiff_t difference_type;
+
+    pointer address (reference v) const {return &v;}
+    const_pointer address (const_reference v) const {return &v;}
+
+    pointer allocate (size_type n, const void* hint = 0) {
+        if (n > std::numeric_limits<size_type>::max() / sizeof(T))
+            throw std::bad_alloc();
+        return static_cast<pointer> (::operator new (n * sizeof (value_type)));
+    }
+
+    void deallocate(pointer p, size_type n) {
+        OPENSSL_cleanse(p, n*sizeof(T));
+        ::operator delete(p); 
+    }
+    
+    size_type max_size() const {
+        return std::numeric_limits<size_type>::max() / sizeof (T);
+    }
+    
+    template<typename U>
+    struct rebind
+    {
+        typedef zallocator<U> other;
+    };
+
+    void construct (pointer ptr, const T& val) {
+        new (static_cast<T*>(ptr) ) T (val);
+    }
+
+    void destroy(pointer ptr) {
+        static_cast<T*>(ptr)->~T();
+    }
+
+#if __cpluplus >= 201103L
+    template<typename U, typename... Args>
+    void construct (U* ptr, Args&&  ... args) {
+        ::new (static_cast<void*> (ptr) ) U (std::forward<Args> (args)...);
+    }
+
+    template<typename U>
+    void destroy(U* ptr) {
+        ptr->~U();
+    }
+#endif
+};
+
+//----- Type Definitions ----------------------------------------------------
+
+typedef unsigned char byte;
+typedef std::basic_string<char, std::char_traits<char>, zallocator<char> > secure_string;
+
+//----- Using ---------------------------------------------------------------
+using namespace std;
+using EVP_CIPHER_CTX_free_ptr = unique_ptr<EVP_CIPHER_CTX, decltype(&::EVP_CIPHER_CTX_free)>;
+
 //----- Global variables ----------------------------------------------------
 unordered_map<char *, int> ip_addresses;
 set<int> ports_in_use;
+
+//----- Constants -----------------------------------------------------------
+static const unsigned int KEY_SIZE = 32;
+static const unsigned int BLOCK_SIZE = 16;
 
 //===== Main program ========================================================
 int main() // TODO: Command line args for 'verbose mode' and webserver file
@@ -177,12 +256,20 @@ void *handle_connection(void *in_args)
         reinterpret_cast<struct connection_info *>(in_args);
 	int client_s = conn->client_socket;
     struct sockaddr_in client_addr = conn->client_addr;
+    struct in_addr client_ip;
+
+    memcpy(&client_ip, &client_addr.sin_addr.s_addr, 4);
+
+    // Load Cipher
+    EVP_add_cipher(EVP_aes_256_cbc());
+
+    
 	
     // Make unique shared secret
     int key = create_shared_secret(client_s);
     cout << "Key: " << key << endl; // TODO: print for testing purposes
     // Create new random knock sequence
-    vector<int> ports = generate_knock_sequence();
+    vector<int> ports = generate_knock_sequence(client_ip);
 
     // Create a packet for knocks
     std::stringstream stream;
@@ -190,19 +277,25 @@ void *handle_connection(void *in_args)
     {
         stream << ports[i];
     }
-    string packet = stream.str();
+    //secure_string plain_text = stream.str().~basic_string;
     
     // TODO: Encrypt packet using key
+    
+    //secure_string packet, recovered_text;
 
+    //byte key[KEY_SIZE], iv[BLOCK_SIZE];
+    //gen_params(key, iv);
+
+    //aes_encrypt(key, iv, plain_text, packet);
 
     // Send packet to client
-    const char * c_pkt = packet.c_str();
+    /*const char * c_pkt = packet.c_str();
     int retcode = send(client_s, c_pkt, (strlen(c_pkt) + 1), 0);
     if (retcode < 0)
     {
         printf("*** ERROR - sendto() failed \n");
         exit(-1);
-    }
+    }*/
     
     // TODO: change to parallel implementation after tests
     // TODO: need a timer to refresh when a knock occurs
@@ -283,24 +376,40 @@ long long int create_shared_secret(int client_s)
     return power(y, a); // key = y^a mod P
 }
 
-/* Generates 3 random ports */
-vector<int> generate_knock_sequence()
+/* Generates 3 ports using sum of numbers in IP_address */
+vector<int> generate_knock_sequence(in_addr client)
 {
+    int modifier = 10;
     vector<int> ports;
+    vector<string> tokens;
+    string ip_addr = inet_ntoa(client);
+    int token_sum = 0;
+
+    tokens = split(ip_addr, '.');
+
+    for (int i = 0; i < tokens.size(); i++){
+        token_sum = stoi(tokens[i]);
+
+    }
+
     while(ports.size() < 3) 
     {
-        int port = rand() % 65000 + 10000; // random 5 digit port
+        
+        int port = token_sum * modifier % 65000 + 10000; 
         // check that port isn't in use already
         if (ports_in_use.find(port) == ports_in_use.end()) {
             ports.push_back(port);
             ports_in_use.insert(port);
+            modifier *= 10;
+        } else{
+            return ports;
         }
     }
     return ports;
 }
 
 /* Creates new UDP socket listening on port_num for a knock */
-bool create_knock_socket(sockaddr_in client, int key, int port_num)
+bool create_knock_socket(sockaddr_in client, int port_num)
 {
     int retcode;
     int server_s;
@@ -390,4 +499,82 @@ long long int power(long long int a, long long int b)
         return a;
     else
         return (((unsigned long long int)pow(a, b)) % DIFFIE_P);
+}
+
+
+// Encrypts using AES, lifted from OpenSSL example
+void aes_encrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ptext, secure_string& ctext)
+{
+    EVP_CIPHER_CTX_free_ptr ctx(EVP_CIPHER_CTX_new(), ::EVP_CIPHER_CTX_free);
+    int rc = EVP_EncryptInit_ex(ctx.get(), EVP_aes_256_cbc(), NULL, key, iv);
+    if (rc != 1)
+      throw runtime_error("EVP_EncryptInit_ex failed");
+
+    // Recovered text expands upto BLOCK_SIZE
+    ctext.resize(ptext.size()+BLOCK_SIZE);
+    int out_len1 = (int)ctext.size();
+
+    rc = EVP_EncryptUpdate(ctx.get(), (byte*)&ctext[0], &out_len1, (const byte*)&ptext[0], (int)ptext.size());
+    if (rc != 1)
+      throw std::runtime_error("EVP_EncryptUpdate failed");
+  
+    int out_len2 = (int)ctext.size() - out_len1;
+    rc = EVP_EncryptFinal_ex(ctx.get(), (byte*)&ctext[0]+out_len1, &out_len2);
+    if (rc != 1)
+      throw std::runtime_error("EVP_EncryptFinal_ex failed");
+
+    // Set cipher text size now that we know it
+    ctext.resize(out_len1 + out_len2);
+}
+
+// Decrypts using AES, lifted from OpenSSL example
+void aes_decrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ctext, secure_string& rtext)
+{
+    EVP_CIPHER_CTX_free_ptr ctx(EVP_CIPHER_CTX_new(), ::EVP_CIPHER_CTX_free);
+    int rc = EVP_DecryptInit_ex(ctx.get(), EVP_aes_256_cbc(), NULL, key, iv);
+    if (rc != 1)
+      throw std::runtime_error("EVP_DecryptInit_ex failed");
+
+    // Recovered text contracts upto BLOCK_SIZE
+    rtext.resize(ctext.size());
+    int out_len1 = (int)rtext.size();
+
+    rc = EVP_DecryptUpdate(ctx.get(), (byte*)&rtext[0], &out_len1, (const byte*)&ctext[0], (int)ctext.size());
+    if (rc != 1)
+      throw std::runtime_error("EVP_DecryptUpdate failed");
+  
+    int out_len2 = (int)rtext.size() - out_len1;
+    rc = EVP_DecryptFinal_ex(ctx.get(), (byte*)&rtext[0]+out_len1, &out_len2);
+    if (rc != 1)
+      throw std::runtime_error("EVP_DecryptFinal_ex failed");
+
+    // Set recovered text size now that we know it
+    rtext.resize(out_len1 + out_len2);
+}
+
+// Generates Key and IV for AES, lifted from OpenSSL example
+void gen_params(byte key[KEY_SIZE], byte iv[BLOCK_SIZE])
+{
+    int rc = RAND_bytes(key, KEY_SIZE);
+    if (rc != 1)
+      throw std::runtime_error("RAND_bytes key failed");
+
+    rc = RAND_bytes(iv, BLOCK_SIZE);
+    if (rc != 1)
+      throw std::runtime_error("RAND_bytes for iv failed");
+}
+
+//Simple string split ripped from http://ysonggit.github.io/coding/2014/12/16/split-a-string-using-c.html
+vector<string> split(const string& s, char delim) {
+    auto i = 0;
+    vector<string> v;
+    auto pos = s.find(delim);
+    while (pos != string::npos) {
+      v.push_back(s.substr(i, pos-i));
+      i = ++pos;
+      pos = s.find(delim, pos);
+
+      if (pos == string::npos)
+         v.push_back(s.substr(i, s.length()));
+    }
 }
