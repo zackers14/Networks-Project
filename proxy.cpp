@@ -4,20 +4,19 @@
 // BSD: g++ proxy.cpp -pthread -o proxy (needs verification)
 //============================================================================
 
-#define WIN
+#define BSD
 
 //----- Include files --------------------------------------------------------
 #include <stdio.h>              // Needed for printf()
 #include <string.h>             // Needed for memcpy() and strcpy
-#include <string>
-#include <cstdlib>             // Needed for exit() 
+#include <cstdlib>             // Needed for exit()
 #include <unordered_map>        // data structure keeping track of IPs
 #include <set>                  // data structure keeping track of ports
 #include <math.h>               // Used in Diffie-Hellman calculations
 #include <vector>               // Convenient container
 #include <iostream>             // cout, cin
 #include <sstream>              // Convenient type conversions
-#include <cstdint>              // 
+#include <cstdint>              //
 #include <ctime>               // time() used as seed for rand()
 #include <openssl/conf.h>       // OpenSSL Configuration
 #include <openssl/evp.h>        // OpenSSL symmetric encrypt/decrypt
@@ -26,52 +25,32 @@
 #include <memory>
 #include <limits>
 #include <stdexcept>
-#ifdef WIN  
+#ifdef WIN
     #include <process.h>        // for threads
     #include <stddef.h>         // for threads
     #include <windows.h>        // for winsock
+    #include <sys/stat.h>
 #endif
 #ifdef BSD
     #include <sys/types.h>      // for sockets
+    #include <sys/stat.h>
     #include <netinet/in.h>     // for sockets
     #include <sys/socket.h>     // for sockets
     #include <arpa/inet.h>      // for sockets
     #include <fcntl.h>          // for sockets
     #include <netdb.h>          // for sockets
     #include <pthread.h>        // for threads
+    #include <unistd.h>
 #endif
 
 //----- Defines -------------------------------------------------------------
-#define PORT_NUM 2352			// arbitrary port number	
+#define PORT_NUM 2352			// arbitrary port number
 #define DIFFIE_P 47          	// arbitrary "large" number
 #define DIFFIE_G 7           	// arbitrary smaller number
 
-//----- Function prototypes -------------------------------------------------
-bool            ip_verified(in_addr client_ip);
-bool            create_knock_socket(sockaddr_in client, int key, int port_num);
-std::vector<int>generate_knock_sequence();
-long long int   create_shared_secret(int client_s);
-long long int   power(long long int a, long long int b);
-void gen_params(byte key[KEY_SIZE], byte iv[BLOCK_SIZE]);
-void aes_encrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ptext, secure_string& ctext);
-void aes_decrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ctext, secure_string& rtext);
-#ifdef WIN
-void            handle_connection(void *in_arg);
-#endif
-#ifdef BSD
-void*           handle_connection(void *in_arg);
-#endif
-
-//----- Struct definitions --------------------------------------------------
-struct connection_info {    // Needed to pass multiple args to new thread
-	connection_info(int client_s, struct sockaddr_in client_address)
-	{
-		client_addr = client_address;
-	    client_socket = client_s;
-	}
-	int client_socket;
-	struct sockaddr_in client_addr;
-};
+//----- Constants -----------------------------------------------------------
+static const unsigned int KEY_SIZE = 32;
+static const unsigned int BLOCK_SIZE = 16;
 
 // Template lifted from OpenSSL AES Encrypt/Decrypt example
 template <typename T>
@@ -97,13 +76,13 @@ public:
 
     void deallocate(pointer p, size_type n) {
         OPENSSL_cleanse(p, n*sizeof(T));
-        ::operator delete(p); 
+        ::operator delete(p);
     }
-    
+
     size_type max_size() const {
         return std::numeric_limits<size_type>::max() / sizeof (T);
     }
-    
+
     template<typename U>
     struct rebind
     {
@@ -136,6 +115,34 @@ public:
 typedef unsigned char byte;
 typedef std::basic_string<char, std::char_traits<char>, zallocator<char> > secure_string;
 
+//----- Function prototypes -------------------------------------------------
+bool            ip_verified(in_addr client_ip);
+bool            create_knock_socket(sockaddr_in client, int port_num);
+std::vector<int>generate_knock_sequence(in_addr);
+std::vector<std::string> split(const std::string&, char);
+long long int   create_shared_secret(int client_s);
+long long int   power(long long int a, long long int b);
+void gen_params(byte key[KEY_SIZE], byte iv[BLOCK_SIZE]);
+void aes_encrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ptext, secure_string& ctext);
+void aes_decrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ctext, secure_string& rtext);
+#ifdef WIN
+void            handle_connection(void *in_arg);
+#endif
+#ifdef BSD
+void*           handle_connection(void *in_arg);
+#endif
+
+//----- Struct definitions --------------------------------------------------
+struct connection_info {    // Needed to pass multiple args to new thread
+	connection_info(int client_s, struct sockaddr_in client_address)
+	{
+		client_addr = client_address;
+	    client_socket = client_s;
+	}
+	int client_socket;
+	struct sockaddr_in client_addr;
+};
+
 //----- Using ---------------------------------------------------------------
 using namespace std;
 using EVP_CIPHER_CTX_free_ptr = unique_ptr<EVP_CIPHER_CTX, decltype(&::EVP_CIPHER_CTX_free)>;
@@ -143,10 +150,6 @@ using EVP_CIPHER_CTX_free_ptr = unique_ptr<EVP_CIPHER_CTX, decltype(&::EVP_CIPHE
 //----- Global variables ----------------------------------------------------
 unordered_map<char *, int> ip_addresses;
 set<int> ports_in_use;
-
-//----- Constants -----------------------------------------------------------
-static const unsigned int KEY_SIZE = 32;
-static const unsigned int BLOCK_SIZE = 16;
 
 //===== Main program ========================================================
 int main() // TODO: Command line args for 'verbose mode' and webserver file
@@ -160,11 +163,14 @@ int main() // TODO: Command line args for 'verbose mode' and webserver file
     int                 client_s;
     struct sockaddr_in  client_addr;
     struct in_addr      client_ip_addr;
+#ifdef WIN
     int                 addr_len;
+#endif
     char                out_buf[4096];
     char                in_buf[4096];
     int                 retcode;
 #ifdef BSD
+    socklen_t           addr_len;
     pthread_t           thread_id;      // Thread ID
 #endif
 #ifdef WIN
@@ -199,7 +205,7 @@ int main() // TODO: Command line args for 'verbose mode' and webserver file
     }
 
     // Accept loop
-    while (1) 
+    while (1)
     {
         addr_len = sizeof(client_addr);
         client_s = accept(server_s, (struct sockaddr *)&client_addr, &addr_len);
@@ -215,7 +221,7 @@ int main() // TODO: Command line args for 'verbose mode' and webserver file
         // Print an informational message of IP address and port of the client
         printf("IP address of client = %s  port = %d\n", inet_ntoa(client_ip_addr),
         ntohs(client_addr.sin_port));
-		
+
 		connection_info *thread_args = new connection_info(client_s, client_addr);
 
         if (ip_verified(client_ip_addr))
@@ -230,7 +236,7 @@ int main() // TODO: Command line args for 'verbose mode' and webserver file
                 printf("ERROR - Unable to create a thread to handle client\n");
                 exit(1);
             }
-            else 
+            else
             {
                 printf("Thread spawned\n");
             }
@@ -252,7 +258,7 @@ void *handle_connection(void *in_args)
 {
     char out_buf[4096];
 
-	struct connection_info *conn = 
+	struct connection_info *conn =
         reinterpret_cast<struct connection_info *>(in_args);
 	int client_s = conn->client_socket;
     struct sockaddr_in client_addr = conn->client_addr;
@@ -263,8 +269,8 @@ void *handle_connection(void *in_args)
     // Load Cipher
     EVP_add_cipher(EVP_aes_256_cbc());
 
-    
-	
+
+
     // Make unique shared secret
     int key = create_shared_secret(client_s);
     cout << "Key: " << key << endl; // TODO: print for testing purposes
@@ -278,9 +284,9 @@ void *handle_connection(void *in_args)
         stream << ports[i];
     }
     //secure_string plain_text = stream.str().~basic_string;
-    
+
     // TODO: Encrypt packet using key
-    
+
     //secure_string packet, recovered_text;
 
     //byte key[KEY_SIZE], iv[BLOCK_SIZE];
@@ -296,14 +302,14 @@ void *handle_connection(void *in_args)
         printf("*** ERROR - sendto() failed \n");
         exit(-1);
     }*/
-    
+
     // TODO: change to parallel implementation after tests
     // TODO: need a timer to refresh when a knock occurs
     // TODO: need way to measure if ports knocked out of order
     // Call create_knock_socket for each port
     for(int port : ports)
     {
-        if (!create_knock_socket(client_addr, key, port)) // knock failed
+        if (!create_knock_socket(client_addr, port)) // knock failed
         {
             // send failure mesasage, close socket, terminate thread
             strcpy(out_buf, "Knock failed\n");
@@ -312,7 +318,7 @@ void *handle_connection(void *in_args)
             closesocket(client_s);
             _endthread();
         #endif
-        #ifdef BSD    
+        #ifdef BSD
             close(client_s);
             pthread_exit(NULL);
         #endif
@@ -325,13 +331,13 @@ void *handle_connection(void *in_args)
 
 /* DoS defense: Checks if client is trying to flood the server.
  * Increments entry for client ip every time they connect. */
-// TODO: Should add timing mechanism which removes IPs after certain time 
+// TODO: Should add timing mechanism which removes IPs after certain time
 // to avoid blocking hosts unnecessarily
 bool ip_verified(in_addr client_ip)
 {
     char * ip = inet_ntoa(client_ip);
     // if ip exists, add 1, otherwise set to 1
-    ip_addresses[ip] = (ip_addresses.find(ip) == ip_addresses.end()) 
+    ip_addresses[ip] = (ip_addresses.find(ip) == ip_addresses.end())
         ? 1 : ip_addresses[ip] + 1;
 
     cout << "# Connect Attempts: " << ip_addresses[ip] << endl;
@@ -341,7 +347,7 @@ bool ip_verified(in_addr client_ip)
 /* Uses Diffie-Hellman algorithm to create shared secret */
 long long int create_shared_secret(int client_s)
 {
-    srand(time(0)); 
+    srand(time(0));
 
     char in_buf[4096];
     int retcode;
@@ -349,11 +355,11 @@ long long int create_shared_secret(int client_s)
     long long int x = power(DIFFIE_G, a); // x = G^a mod P
     long long int y;
     stringstream stream;
-    
+
     stream << x;
     string packet = stream.str();
     const char * c_pkt = packet.c_str();
-    
+
     // Send x
     retcode = send(client_s, c_pkt, (strlen(c_pkt) + 1), 0);
     if(retcode < 0)
@@ -392,10 +398,10 @@ vector<int> generate_knock_sequence(in_addr client)
 
     }
 
-    while(ports.size() < 3) 
+    while(ports.size() < 3)
     {
-        
-        int port = token_sum * modifier % 65000 + 10000; 
+
+        int port = token_sum * modifier % 65000 + 10000;
         // check that port isn't in use already
         if (ports_in_use.find(port) == ports_in_use.end()) {
             ports.push_back(port);
@@ -414,7 +420,12 @@ bool create_knock_socket(sockaddr_in client, int port_num)
     int retcode;
     int server_s;
     int client_s;
+#ifdef WIN
     int addr_len;
+#endif
+#ifdef BSD
+    socklen_t addr_len;
+#endif
     char out_buf[4096];
     char in_buf[4096];
     bool success;
@@ -452,7 +463,7 @@ bool create_knock_socket(sockaddr_in client, int port_num)
     }
 
     memcpy(&client_ip_addr, &client_addr.sin_addr.s_addr, 4);
-    printf("IP address of knock = %s  port = %d \n", 
+    printf("IP address of knock = %s  port = %d \n",
         inet_ntoa(client_ip_addr), ntohs(client_addr.sin_port));
 
     // TODO: Decrypt packet
@@ -465,12 +476,12 @@ bool create_knock_socket(sockaddr_in client, int port_num)
     if(success)
     {
         strcpy(out_buf, "1");
-    }   
+    }
     else
     {
         strcpy(out_buf, "0");
     }
-    
+
     // Send knock packet to port
     retcode = sendto(server_s, out_buf, (strlen(out_buf) + 1), 0,
         (struct sockaddr *)&client_addr, sizeof(client_addr));
@@ -493,9 +504,9 @@ bool create_knock_socket(sockaddr_in client, int port_num)
 }
 
 /* Power function to return value of a ^ b mod P */
-long long int power(long long int a, long long int b) 
-{  
-    if (b == 1) 
+long long int power(long long int a, long long int b)
+{
+    if (b == 1)
         return a;
     else
         return (((unsigned long long int)pow(a, b)) % DIFFIE_P);
@@ -517,7 +528,7 @@ void aes_encrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secu
     rc = EVP_EncryptUpdate(ctx.get(), (byte*)&ctext[0], &out_len1, (const byte*)&ptext[0], (int)ptext.size());
     if (rc != 1)
       throw std::runtime_error("EVP_EncryptUpdate failed");
-  
+
     int out_len2 = (int)ctext.size() - out_len1;
     rc = EVP_EncryptFinal_ex(ctx.get(), (byte*)&ctext[0]+out_len1, &out_len2);
     if (rc != 1)
@@ -542,7 +553,7 @@ void aes_decrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secu
     rc = EVP_DecryptUpdate(ctx.get(), (byte*)&rtext[0], &out_len1, (const byte*)&ctext[0], (int)ctext.size());
     if (rc != 1)
       throw std::runtime_error("EVP_DecryptUpdate failed");
-  
+
     int out_len2 = (int)rtext.size() - out_len1;
     rc = EVP_DecryptFinal_ex(ctx.get(), (byte*)&rtext[0]+out_len1, &out_len2);
     if (rc != 1)
