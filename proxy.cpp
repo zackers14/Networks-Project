@@ -10,6 +10,7 @@
 #include <stdio.h>              // Needed for printf()
 #include <string.h>             // Needed for memcpy() and strcpy
 #include <cstdlib>             // Needed for exit()
+#include <errno.h>
 #include <unordered_map>        // data structure keeping track of IPs
 #include <set>                  // data structure keeping track of ports
 #include <math.h>               // Used in Diffie-Hellman calculations
@@ -44,7 +45,7 @@
 #endif
 
 //----- Defines -------------------------------------------------------------
-#define PORT_NUM 2352			// arbitrary port number
+#define PORT_NUM 2370		// arbitrary port number
 #define DIFFIE_P 47          	// arbitrary "large" number
 #define DIFFIE_G 7           	// arbitrary smaller number
 
@@ -118,11 +119,11 @@ typedef std::basic_string<char, std::char_traits<char>, zallocator<char> > secur
 //----- Function prototypes -------------------------------------------------
 bool            ip_verified(in_addr client_ip);
 bool            create_knock_socket(sockaddr_in client, int port_num);
-std::vector<int>generate_knock_sequence(in_addr);
+std::vector<int>generate_knock_sequence();
 std::vector<std::string> split(const std::string&, char);
 long long int   create_shared_secret(int client_s);
 long long int   power(long long int a, long long int b);
-void gen_params(byte key[KEY_SIZE], byte iv[BLOCK_SIZE]);
+void gen_params(byte key[KEY_SIZE], byte iv[BLOCK_SIZE], long long int, long long int);
 void aes_encrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ptext, secure_string& ctext);
 void aes_decrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ctext, secure_string& rtext);
 #ifdef WIN
@@ -230,7 +231,7 @@ int main() // TODO: Command line args for 'verbose mode' and webserver file
             if (_beginthread(handle_connection, 4096, (void *)thread_args) < 0)
         #endif
         #ifdef BSD
-            if (pthread_create(&thread_id, NULL, handle_connection, (void *)&thread_args) != 0)
+            if (pthread_create(&thread_id, NULL, handle_connection, (void *)thread_args) != 0)
         #endif
             {
                 printf("ERROR - Unable to create a thread to handle client\n");
@@ -258,13 +259,11 @@ void *handle_connection(void *in_args)
 {
     char out_buf[4096];
 
-	struct connection_info *conn =
-        reinterpret_cast<struct connection_info *>(in_args);
-	int client_s = conn->client_socket;
-    struct sockaddr_in client_addr = conn->client_addr;
-    struct in_addr client_ip;
+	int client_s = ((struct connection_info *) in_args)->client_socket;
+    struct sockaddr_in client_addr = ((struct connection_info *) in_args)->client_addr;
+    //struct in_addr client_ip;
 
-    memcpy(&client_ip, &client_addr.sin_addr.s_addr, 4);
+    //memcpy(&client_ip, &client_addr.sin_addr.s_addr, 4);
 
     // Load Cipher
     EVP_add_cipher(EVP_aes_256_cbc());
@@ -272,10 +271,15 @@ void *handle_connection(void *in_args)
 
 
     // Make unique shared secret
-    int key = create_shared_secret(client_s);
+    long long int key = create_shared_secret(client_s);
+    long long int iv = create_shared_secret(client_s);
+
+    byte key_bytes[KEY_SIZE];
+    byte iv_bytes[BLOCK_SIZE];
+    gen_params(key_bytes, iv_bytes, key, iv);
     cout << "Key: " << key << endl; // TODO: print for testing purposes
     // Create new random knock sequence
-    vector<int> ports = generate_knock_sequence(client_ip);
+    vector<int> ports = generate_knock_sequence();
 
     // Create a packet for knocks
     std::stringstream stream;
@@ -283,25 +287,26 @@ void *handle_connection(void *in_args)
     {
         stream << ports[i];
     }
-    //secure_string plain_text = stream.str().~basic_string;
+    secure_string plain_text = stream.str().c_str();
+    secure_string packet, recovered_text;
 
     // TODO: Encrypt packet using key
 
-    //secure_string packet, recovered_text;
-
+    aes_encrypt(key_bytes, iv_bytes, plain_text, packet);
+    aes_decrypt(key_bytes, iv_bytes, packet, recovered_text);
     //byte key[KEY_SIZE], iv[BLOCK_SIZE];
     //gen_params(key, iv);
 
     //aes_encrypt(key, iv, plain_text, packet);
 
     // Send packet to client
-    /*const char * c_pkt = packet.c_str();
+    const char * c_pkt = packet.c_str();
     int retcode = send(client_s, c_pkt, (strlen(c_pkt) + 1), 0);
     if (retcode < 0)
     {
         printf("*** ERROR - sendto() failed \n");
         exit(-1);
-    }*/
+    }
 
     // TODO: change to parallel implementation after tests
     // TODO: need a timer to refresh when a knock occurs
@@ -358,10 +363,12 @@ long long int create_shared_secret(int client_s)
 
     stream << x;
     string packet = stream.str();
-    const char * c_pkt = packet.c_str();
+    //const char * c_pkt = packet.c_str();
+    char out_buff[4096];
+    strcpy(out_buff, packet.c_str());
 
     // Send x
-    retcode = send(client_s, c_pkt, (strlen(c_pkt) + 1), 0);
+    retcode = send(client_s, out_buff, (strlen(out_buff) + 1), 0);
     if(retcode < 0)
     {
         printf("*** ERROR - send() failed \n");
@@ -383,35 +390,19 @@ long long int create_shared_secret(int client_s)
 }
 
 /* Generates 3 ports using sum of numbers in IP_address */
-vector<int> generate_knock_sequence(in_addr client)
+vector<int> generate_knock_sequence()
 {
-    int modifier = 10;
-    vector<int> ports;
-    vector<string> tokens;
-    string ip_addr = inet_ntoa(client);
-    int token_sum = 0;
-
-    tokens = split(ip_addr, '.');
-
-    for (int i = 0; i < tokens.size(); i++){
-        token_sum = stoi(tokens[i]);
-
-    }
-
-    while(ports.size() < 3)
-    {
-
-        int port = token_sum * modifier % 65000 + 10000;
-        // check that port isn't in use already
-        if (ports_in_use.find(port) == ports_in_use.end()) {
-            ports.push_back(port);
-            ports_in_use.insert(port);
-            modifier *= 10;
-        } else{
-            return ports;
-        }
-    }
-    return ports;
+     vector<int> ports;
+     while(ports.size() < 3)
+     {
+         int port = rand() % 65000 + 10000; // random 5 digit port
+         // check that port isn't in use already
+         if (ports_in_use.find(port) == ports_in_use.end()) {
+             ports.push_back(port);
+             ports_in_use.insert(port);
+         }
+     }
+     return ports;
 }
 
 /* Creates new UDP socket listening on port_num for a knock */
@@ -490,7 +481,6 @@ bool create_knock_socket(sockaddr_in client, int port_num)
         printf("*** ERROR - sendto() failed \n");
         exit(-1);
     }
-
 #ifdef WIN
     closesocket(server_s);
 #endif
@@ -564,15 +554,35 @@ void aes_decrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secu
 }
 
 // Generates Key and IV for AES, lifted from OpenSSL example
-void gen_params(byte key[KEY_SIZE], byte iv[BLOCK_SIZE])
+void gen_params(byte key[], byte iv[], long long int k, long long int i)
 {
-    int rc = RAND_bytes(key, KEY_SIZE);
+    string k_string = to_string(k);
+    string i_string = to_string(i);
+
+    char const *k_byte = k_string.c_str();
+    char const *i_byte = i_string.c_str();
+
+    for (int j = 0; j < KEY_SIZE; j++){
+      if (j < sizeof(k_byte)){
+        key[j] = k_byte[j];
+      } else {
+        key[j] = '0';
+      }
+    }
+    for (int j = 0; j < BLOCK_SIZE; j++){
+      if (j < sizeof(i_byte) && i_byte[j] > '0' && i_byte[j] <= '9'){
+        iv[j] = i_byte[j];
+      } else {
+        iv[j] = '0';
+      }
+    }
+    /*int rc = RAND_bytes(key, KEY_SIZE);
     if (rc != 1)
       throw std::runtime_error("RAND_bytes key failed");
 
     rc = RAND_bytes(iv, BLOCK_SIZE);
     if (rc != 1)
-      throw std::runtime_error("RAND_bytes for iv failed");
+      throw std::runtime_error("RAND_bytes for iv failed");*/
 }
 
 //Simple string split ripped from http://ysonggit.github.io/coding/2014/12/16/split-a-string-using-c.html
