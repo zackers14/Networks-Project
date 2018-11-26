@@ -1,7 +1,10 @@
 //============================================================================
 // --- Compilation notes ---
 // WIN: g++ client.cpp -lws2_32 -o client
-// BSD: g++ client.cpp -lpthread -o client (needs verification)
+// BSD: g++ client.cpp -lpthread -lssl -lcrypto -o client
+// --- Execution notes ---
+// BSD: ./client {verbose mode} {ip}
+//                    0/1
 //============================================================================
 
 #define BSD

@@ -1,7 +1,10 @@
 //============================================================================
 // --- Compilation notes ---
 // WIN: g++ proxy.cpp -lws2_32 -o proxy
-// BSD: g++ proxy.cpp -pthread -o proxy (needs verification)
+// BSD: g++ proxy.cpp -lpthread -lssl -lcrypto -o proxy (needs verification)
+// --- Execution Notes ---
+// BSD: ./proxy {verbose mode}
+//                  0 or 1
 //============================================================================
 
 #define BSD
