@@ -55,7 +55,7 @@
 #endif
 
 //----- Defines -------------------------------------------------------------
-#define PORT_NUM 2380		// arbitrary port number
+#define PORT_NUM 2381		// arbitrary port number
 #define WEBLITE_PORT 8094
 #define WEBLITE_ADDR "127.0.0.1"
 #define DIFFIE_P 47          	// arbitrary "large" number
@@ -208,7 +208,7 @@ int main(int argc, char * argv[]) // TODO: Command line args for 'verbose mode' 
     WSAStartup(wVersionRequested, &wsaData);
 #endif
 
-    if (*argv[1] == 1){
+    if (*argv[1] == '1'){
       verbose = true;
     }
 
