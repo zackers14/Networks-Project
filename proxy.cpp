@@ -55,8 +55,8 @@
 #endif
 
 //----- Defines -------------------------------------------------------------
-#define PORT_NUM 2379		// arbitrary port number
-#define WEBLITE_PORT 8093
+#define PORT_NUM 2380		// arbitrary port number
+#define WEBLITE_PORT 8094
 #define WEBLITE_ADDR "127.0.0.1"
 #define DIFFIE_P 47          	// arbitrary "large" number
 #define DIFFIE_G 7           	// arbitrary smaller number
@@ -352,14 +352,7 @@ void *handle_connection(void *in_args)
     secure_string plain_text = stream.str().c_str();
     secure_string packet, recovered_text;
 
-    // TODO: Encrypt packet using key
-
     aes_encrypt(key_bytes, iv_bytes, plain_text, packet);
-    aes_decrypt(key_bytes, iv_bytes, packet, recovered_text);
-    //byte key[KEY_SIZE], iv[BLOCK_SIZE];
-    //gen_params(key, iv);
-
-    //aes_encrypt(key, iv, plain_text, packet);
 
     // Send packet to client
     const char * c_pkt = packet.c_str();
@@ -377,9 +370,6 @@ void *handle_connection(void *in_args)
         exit(-1);
     }
 
-    // TODO: change to parallel implementation after tests
-    // TODO: need a timer to refresh when a knock occurs
-    // TODO: need way to measure if ports knocked out of order
     // Call create_knock_socket for each port
     for(int port : ports)
     {
@@ -398,78 +388,17 @@ void *handle_connection(void *in_args)
         #endif
         }
     }
+    // New process initializers
 pid_t proc;
 int status;
 char * ip = inet_ntoa(client_ip);
 
+// Fork a new process to begin the timer and start weblite
 if (proc = fork() == 0 ){
   execute_with_timer();
 } else{
   waitpid(proc, &status, 0);
-  /*int weblite;
-  struct sockaddr_in weblitesock;
 
-  //intialize weblite socket parameters
-  weblitesock.sin_family = AF_INET;
-  weblitesock.sin_port = htons(WEBLITE_PORT);
-  weblitesock.sin_addr.s_addr = inet_addr(WEBLITE_ADDR);
-  while (waitpid(proc, &status, WNOHANG) == 0){
-    // Begin receiving HTTP requests from client
-    retcode = recv(client_s, in_buf, sizeof(in_buf), 0);
-    if (retcode < 0)
-    {
-        printf("*** ERROR - recv() http request failed \n");
-        exit(-1);
-    }
-
-    //decrypt request
-    packet = in_buf;
-
-    aes_decrypt(key_bytes, iv_bytes, packet, recovered_text);
-
-    c_pkt = recovered_text.c_str();
-    // Create weblite socket
-    weblite = socket(AF_INET, SOCK_STREAM, 0);
-    if (weblite < 0){
-      printf("*** ERROR - Weblite socket failed \n");
-      exit(-1);
-    }
-    //connect to weblite
-    retcode = connect(weblite, (struct sockaddr *)&weblitesock,
-        sizeof(weblitesock));
-      if (retcode < 0)
-      {
-          printf("*** ERROR - connect() failed \n");
-          exit(-1);
-      }
-      //Send HTTP request to weblite
-      int retcode = send(weblite, c_pkt, (strlen(c_pkt) + 1), 0);
-      if (retcode < 0)
-      {
-          printf("*** ERROR - sendto() failed \n");
-          exit(-1);
-      }
-      //Receive file information from weblite
-      retcode = recv(weblite, in_buf, sizeof(in_buf), 0);
-      if (retcode < 0)
-      {
-          printf("*** ERROR - recv() failed \n");
-          exit(-1);
-      }
-
-      //encrypt information
-      plain_text = in_buf;
-      aes_encrypt(key_bytes, iv_bytes, plain_text, packet);
-
-      c_pkt = packet.c_str();
-      //Send encrypted information
-      retcode = send(client_s, c_pkt, (strlen(c_pkt) + 1), 0);
-      if (retcode < 0)
-      {
-          printf("*** ERROR - sendto() failed \n");
-          exit(-1);
-      }
-    }*/
 }
 
 
@@ -477,8 +406,6 @@ if (proc = fork() == 0 ){
 
 /* DoS defense: Checks if client is trying to flood the server.
  * Increments entry for client ip every time they connect. */
-// TODO: Should add timing mechanism which removes IPs after certain time
-// to avoid blocking hosts unnecessarily
 bool ip_verified(in_addr client_ip)
 {
     char * ip = inet_ntoa(client_ip);
@@ -609,7 +536,7 @@ bool create_knock_socket(sockaddr_in client, int port_num, byte key[], byte iv[]
     printf("IP address of knock = %s  port = %d \n",
         inet_ntoa(client_ip_addr), ntohs(client_addr.sin_port));
 
-    // TODO: Decrypt packet
+    // Decrypt packet
     secure_string cipher_text, recovered_text;
     cipher_text = in_buf;
 
@@ -710,7 +637,7 @@ void aes_decrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secu
     rtext.resize(out_len1 + out_len2);
 }
 
-// Generates Key and IV for AES, lifted from OpenSSL example
+// Generates Key and IV for AES
 void gen_params(byte key[], byte iv[], long long int k, long long int i)
 {
     string k_string = to_string(k);
@@ -742,32 +669,20 @@ void gen_params(byte key[], byte iv[], long long int k, long long int i)
       throw std::runtime_error("RAND_bytes for iv failed");*/
 }
 
-//Simple string split ripped from http://ysonggit.github.io/coding/2014/12/16/split-a-string-using-c.html
-vector<string> split(const string& s, char delim) {
-    auto i = 0;
-    vector<string> v;
-    auto pos = s.find(delim);
-    while (pos != string::npos) {
-      v.push_back(s.substr(i, pos-i));
-      i = ++pos;
-      pos = s.find(delim, pos);
 
-      if (pos == string::npos)
-         v.push_back(s.substr(i, s.length()));
-    }
-}
 #ifdef BSD
 
+// Executes weblite with a timer
 void execute_with_timer(){
-  //signal(SIGINT, sigint);
 
+  //Set timeout of 10 seconds
   int timeout = 10;
   pid_t pid;
   struct itimerval timer;
   struct sigaction sa;
   printf("launching weblite \n");
-  //setitimer (ITIMER_VIRTUAL, &timer, 0);
 
+// Fork a new process for weblite to use
   if (pid = fork() == 0){
 
     try{
@@ -777,10 +692,12 @@ void execute_with_timer(){
     printf("Handled gracefully \n");
   }
   } else{
+    //Protects shared memory structure
       sem_wait(&mutex);
       wait_struc->wait_time = 0;
       sem_post(&mutex);
       int stat, wpid = 0;
+      // Waits until timer has expired
     do {
       wpid = waitpid(pid, &stat, WNOHANG);
       if (wpid == 0){
@@ -805,6 +722,7 @@ void execute_with_timer(){
   }
 }
 
+//Signal handler for interrupts
 void sigint(int sig){
   //Detach and remove shared memory
   if (shmdt(wait_struc) == -1){
@@ -816,6 +734,7 @@ void sigint(int sig){
   exit(0);
 }
 
+// Blank signal handler for quits
 void sigquit(int sig){
 
 }

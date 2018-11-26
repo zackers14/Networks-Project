@@ -113,7 +113,7 @@ typedef std::basic_string<char, std::char_traits<char>, zallocator<char> > secur
 
 
 //----- Defines -------------------------------------------------------------
-#define PORT_NUM 2379		// arbitrary port number
+#define PORT_NUM 2380		// arbitrary port number
 //#define IP_ADDR  "127.0.0.1"	// TODO: make command line arg for server IP
 #define DIFFIE_P 47          	// arbitrary "large" number
 #define DIFFIE_G 7           	// arbitrary smaller number
@@ -249,18 +249,6 @@ int main(int argc, char * argv[])
 
     cout << "Knocked ports successfully!" << endl;
 
-    // // Receive webserver port packet
-    // retcode = recv(client_s, in_buf, sizeof(in_buf), 0);
-    // if (retcode < 0)
-    // {
-    //     printf("*** ERROR - recv() failed \n");
-    //     exit(-1);
-    // }
-
-    // // TODO: Unencrypt port
-    // string reply(in_buf);
-    // ports = parse_ports(reply, 1);
-    // cout << "Web port: " << port << endl;
 }
 
 /* Uses Diffie-Hellman algorithm to create shared secret */
@@ -373,18 +361,11 @@ bool knock_port(int port, byte key[], byte iv[])
     server_addr.sin_port = htons(port);               // Port num to use
     server_addr.sin_addr.s_addr = inet_addr(server_ip); // IP address to use
 
-    // TODO: Encrypt port number using key
     secure_string plain_text = to_string(port).c_str();
     secure_string packet, recovered_text;
 
-    // TODO: Encrypt packet using key
-
+    // Encrypt port number
     aes_encrypt(key, iv, plain_text, packet);
-    //aes_decrypt(key_bytes, iv_bytes, packet, recovered_text);
-    //byte key[KEY_SIZE], iv[BLOCK_SIZE];
-    //gen_params(key, iv);
-
-    //aes_encrypt(key, iv, plain_text, packet);
 
     // Send packet to client
     const char * c_pkt = packet.c_str();
@@ -514,11 +495,5 @@ void gen_params(byte key[], byte iv[], long long int k, long long int i)
         iv[j] = '0';
       }
     }
-    /*int rc = RAND_bytes(key, KEY_SIZE);
-    if (rc != 1)
-      throw std::runtime_error("RAND_bytes key failed");
 
-    rc = RAND_bytes(iv, BLOCK_SIZE);
-    if (rc != 1)
-      throw std::runtime_error("RAND_bytes for iv failed");*/
 }
