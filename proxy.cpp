@@ -162,9 +162,20 @@ struct connection_info {    // Needed to pass multiple args to new thread
 using namespace std;
 using EVP_CIPHER_CTX_free_ptr = unique_ptr<EVP_CIPHER_CTX, decltype(&::EVP_CIPHER_CTX_free)>;
 
+//Initialize necessary variables for shared memory
+int shmid;
+
+typedef struct
+{
+  int wait_time;
+} shared_mem;
+
 bool verbose = false;
 unordered_map<char *, int> ip_addresses;
 set<int> ports_in_use;
+shared_mem *wait_struc;
+sem_t mutex;
+
 //===== Main program ========================================================
 int main(int argc, char * argv[]) // TODO: Command line args for 'verbose mode' and webserver file
 {
@@ -186,6 +197,8 @@ int main(int argc, char * argv[]) // TODO: Command line args for 'verbose mode' 
 #ifdef BSD
     socklen_t           addr_len;
     pthread_t           thread_id;      // Thread ID
+    pthread_attr_t  attr[1]; //Attribute pointer array
+    signal(SIGINT, sigint);
     signal(SIGQUIT, sigquit);
 #endif
 #ifdef WIN
@@ -195,6 +208,33 @@ int main(int argc, char * argv[]) // TODO: Command line args for 'verbose mode' 
     if (argv[1]){
       verbose = true;
     }
+
+    //Initialize necessary variables for shared memory
+    char * shmadd;
+    shmadd = (char *) 0;
+
+    //Initialize the semaphore
+    sem_init(&mutex, 0, 1);
+
+    //Create a shared memory section
+    if ((shmid = shmget(SHMKEY, sizeof(int), IPC_CREAT | 0666)) < 0){
+      perror("shmget");
+      exit(1);
+    }
+
+    //Connect to shared memory section
+    if ((wait_struc = (shared_mem *) shmat(shmid, shmadd, 0)) == (shared_mem *)-1){
+      perror("shmat");
+      exit(0);
+    }
+
+    wait_struc->wait_time = 0;
+
+    //Schedule thread independently
+    pthread_attr_init(&attr[0]);
+    pthread_attr_setscope(&attr[0], PTHREAD_SCOPE_SYSTEM);
+    //Schedule thread independently END
+
 
     // Create server socket
     server_s = socket(AF_INET, SOCK_STREAM, 0);
@@ -249,7 +289,7 @@ int main(int argc, char * argv[]) // TODO: Command line args for 'verbose mode' 
             if (_beginthread(handle_connection, 4096, (void *)thread_args) < 0)
         #endif
         #ifdef BSD
-            if (pthread_create(&thread_id, NULL, handle_connection, (void *)thread_args) != 0)
+            if (pthread_create(&thread_id, &attr[0], handle_connection, (void *)thread_args) != 0)
         #endif
             {
                 printf("ERROR - Unable to create a thread to handle client\n");
@@ -729,14 +769,20 @@ void execute_with_timer(){
     printf("Handled gracefully \n");
   }
   } else{
-      int waittime = 0;
+      sem_wait(&mutex);
+      wait_struc->wait_time = 0;
+      sem_post(&mutex);
       int stat, wpid = 0;
     do {
       wpid = waitpid(pid, &stat, WNOHANG);
       if (wpid == 0){
-        if (waittime < 10){
+        sem_wait(&mutex);
+        if (wait_struc->wait_time < 10){
+        sem_post(&mutex);
         sleep(1);
-        waittime++;
+        sem_wait(&mutex);
+        wait_struc->wait_time++;
+        sem_post(&mutex);
         printf("Slept for 1 sec\n");
       }
       else {
@@ -746,13 +792,20 @@ void execute_with_timer(){
         waitpid(pid, &stat, 0);
         }
       }
-    } while (wpid == 0 && waittime <= timeout);
+    } while (wpid == 0 && wait_struc->wait_time <= timeout);
 
   }
 }
 
 void sigint(int sig){
-
+  //Detach and remove shared memory
+  if (shmdt(wait_struc) == -1){
+    perror("shmdt");
+    exit(-1);
+  }
+  shmctl(shmid, IPC_RMID, NULL);
+  sem_destroy(&mutex);
+  exit(0);
 }
 
 void sigquit(int sig){
