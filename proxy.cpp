@@ -45,10 +45,11 @@
     #include <netdb.h>          // for sockets
     #include <pthread.h>        // for threads
     #include <unistd.h>
+    #include <sys/wait.h>
 #endif
 
 //----- Defines -------------------------------------------------------------
-#define PORT_NUM 2370		// arbitrary port number
+#define PORT_NUM 2377		// arbitrary port number
 #define DIFFIE_P 47          	// arbitrary "large" number
 #define DIFFIE_G 7           	// arbitrary smaller number
 
@@ -134,8 +135,10 @@ void            handle_connection(void *in_arg);
 #endif
 #ifdef BSD
 void            timer_handler (int signum);
-void            execute_with_timer(int seconds);
+void            execute_with_timer(void);
 void*           handle_connection(void *in_arg);
+void sigint(int);
+void sigquit(int);
 #endif
 
 //----- Struct definitions --------------------------------------------------
@@ -156,7 +159,6 @@ using EVP_CIPHER_CTX_free_ptr = unique_ptr<EVP_CIPHER_CTX, decltype(&::EVP_CIPHE
 //----- Global variables ----------------------------------------------------
 unordered_map<char *, int> ip_addresses;
 set<int> ports_in_use;
-pid_t pid;
 
 //===== Main program ========================================================
 int main() // TODO: Command line args for 'verbose mode' and webserver file
@@ -179,6 +181,7 @@ int main() // TODO: Command line args for 'verbose mode' and webserver file
 #ifdef BSD
     socklen_t           addr_len;
     pthread_t           thread_id;      // Thread ID
+      signal(SIGQUIT, sigquit);
 #endif
 #ifdef WIN
     WSAStartup(wVersionRequested, &wsaData);
@@ -335,8 +338,14 @@ void *handle_connection(void *in_args)
         #endif
         }
     }
+pid_t proc;
+int status;
 
-  execute_with_timer(10);
+if (proc = fork() == 0 ){
+  execute_with_timer();
+} else{
+  
+}
     // TODO: if all succeed, launch weblite, send client encrypted server port
 
 }
@@ -607,29 +616,56 @@ vector<string> split(const string& s, char delim) {
     }
 }
 #ifdef BSD
-void execute_with_timer(int seconds){
-if (pid = fork() == 0){
 
-    struct itimerval timer;
-    struct sigaction sa;
+void execute_with_timer(){
+  signal(SIGINT, sigint);
 
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = &timer_handler;
-    sigaction(SIGVTALRM, &sa, 0);
+  int timeout = 10;
+  pid_t pid;
+  struct itimerval timer;
+  struct sigaction sa;
+  printf("launching weblite \n");
+  //setitimer (ITIMER_VIRTUAL, &timer, 0);
 
-    timer.it_value.tv_sec = seconds;
-    timer.it_value.tv_usec = 0;
-    timer.it_interval.tv_sec = 0;
-    timer.it_interval.tv_usec = 0;
-    printf("launching weblite \n");
-    setitimer (ITIMER_VIRTUAL, &timer, 0);
-    execl("./weblite", "/weblite");
+  if (pid = fork() == 0){
+
+    try{
+    execl("./weblite", "weblite");
   }
+  catch (...){
+    printf("Handled gracefully \n");
+  }
+  } else{
+      int waittime = 0;
+      int stat, wpid = 0;
+    do {
+      wpid = waitpid(pid, &stat, WNOHANG);
+      if (wpid == 0){
+        if (waittime < 10){
+        sleep(1);
+        waittime++;
+        printf("Slept for 1 sec\n");
+      }
+      else {
+        printf("Killing\n");
+        //kill(pid, SIGINT);
+        kill(pid, SIGQUIT);
+        waitpid(pid, &stat, 0);
+        }
+      }
+    } while (wpid == 0 && waittime <= timeout);
+
+  }
+  printf("Exiting?\n");
 }
 
-void timer_handler (int signum){
-  printf("Time's up, killing webserver \n");
-  kill(pid, 9);
+void sigint(int sig){
+
 }
+
+void sigquit(int sig){
+
+}
+
 
 #endif
