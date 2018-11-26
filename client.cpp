@@ -113,7 +113,7 @@ typedef std::basic_string<char, std::char_traits<char>, zallocator<char> > secur
 
 
 //----- Defines -------------------------------------------------------------
-#define PORT_NUM 2378		// arbitrary port number
+#define PORT_NUM 2379		// arbitrary port number
 //#define IP_ADDR  "127.0.0.1"	// TODO: make command line arg for server IP
 #define DIFFIE_P 47          	// arbitrary "large" number
 #define DIFFIE_G 7           	// arbitrary smaller number
@@ -175,7 +175,7 @@ int main(int argc, char * argv[])
       exit(-1);
     }
 
-    if (argv[1]){
+    if (*argv[1] == 1){
       verbose = true;
     }
 
