@@ -35,6 +35,9 @@
 #ifdef BSD
     #include <sys/types.h>      // for sockets
     #include <sys/stat.h>
+    #include <sys/time.h>
+    #include <signal.h>
+    #include <stdarg.h>
     #include <netinet/in.h>     // for sockets
     #include <sys/socket.h>     // for sockets
     #include <arpa/inet.h>      // for sockets
@@ -130,6 +133,8 @@ void aes_decrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secu
 void            handle_connection(void *in_arg);
 #endif
 #ifdef BSD
+void            timer_handler (int signum);
+void            execute_with_timer(int seconds);
 void*           handle_connection(void *in_arg);
 #endif
 
@@ -151,6 +156,7 @@ using EVP_CIPHER_CTX_free_ptr = unique_ptr<EVP_CIPHER_CTX, decltype(&::EVP_CIPHE
 //----- Global variables ----------------------------------------------------
 unordered_map<char *, int> ip_addresses;
 set<int> ports_in_use;
+pid_t pid;
 
 //===== Main program ========================================================
 int main() // TODO: Command line args for 'verbose mode' and webserver file
@@ -330,6 +336,7 @@ void *handle_connection(void *in_args)
         }
     }
 
+  execute_with_timer(10);
     // TODO: if all succeed, launch weblite, send client encrypted server port
 
 }
@@ -599,3 +606,30 @@ vector<string> split(const string& s, char delim) {
          v.push_back(s.substr(i, s.length()));
     }
 }
+#ifdef BSD
+void execute_with_timer(int seconds){
+if (pid = fork() == 0){
+
+    struct itimerval timer;
+    struct sigaction sa;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = &timer_handler;
+    sigaction(SIGVTALRM, &sa, 0);
+
+    timer.it_value.tv_sec = seconds;
+    timer.it_value.tv_usec = 0;
+    timer.it_interval.tv_sec = 0;
+    timer.it_interval.tv_usec = 0;
+    printf("launching weblite \n");
+    setitimer (ITIMER_VIRTUAL, &timer, 0);
+    execl("./weblite", "/weblite");
+  }
+}
+
+void timer_handler (int signum){
+  printf("Time's up, killing webserver \n");
+  kill(pid, 9);
+}
+
+#endif
