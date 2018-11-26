@@ -399,7 +399,7 @@ if (proc = fork() == 0 ){
 } else{
   waitpid(proc, &status, 0);
   OPENSSL_cleanse(key_bytes, KEY_SIZE);
-  OPENSSL_cleanse(iv_bytes, IV_SIZE);
+  OPENSSL_cleanse(iv_bytes, BLOCK_SIZE);
 }
 
 

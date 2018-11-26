@@ -247,7 +247,7 @@ int main(int argc, char * argv[])
         }
     }
     OPENSSL_cleanse(key_bytes, KEY_SIZE);
-    OPENSSL_cleanse(iv_bytes, IV_SIZE);
+    OPENSSL_cleanse(iv_bytes, BLOCK_SIZE);
     cout << "Knocked ports successfully!" << endl;
 
 }
