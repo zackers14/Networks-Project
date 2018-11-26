@@ -111,7 +111,7 @@ typedef std::basic_string<char, std::char_traits<char>, zallocator<char> > secur
 
 //----- Defines -------------------------------------------------------------
 #define PORT_NUM 2378		// arbitrary port number
-#define IP_ADDR  "127.0.0.1"	// TODO: make command line arg for server IP
+//#define IP_ADDR  "127.0.0.1"	// TODO: make command line arg for server IP
 #define DIFFIE_P 47          	// arbitrary "large" number
 #define DIFFIE_G 7           	// arbitrary smaller number
 
@@ -147,6 +147,7 @@ struct connection_info {    // Needed to pass multiple args to new thread
 using namespace std;
 using EVP_CIPHER_CTX_free_ptr = unique_ptr<EVP_CIPHER_CTX, decltype(&::EVP_CIPHER_CTX_free)>;
 
+char * server_ip;
 bool verbose = false;
 //===== Main program ========================================================
 int main(int argc, char * argv[])
@@ -166,9 +167,16 @@ int main(int argc, char * argv[])
     WSAStartup(wVersionRequested, &wsaData);
 #endif
 
+    if (argc != 3){
+      printf("*** ERROR - invalid number of arguments \n");
+      exit(-1);
+    }
+
     if (argv[1]){
       verbose = true;
     }
+
+    server_ip = argv[2];
 
     // Create initial socket
     client_s = socket(AF_INET, SOCK_STREAM, 0);
@@ -181,7 +189,7 @@ int main(int argc, char * argv[])
     // Perform initial connection to server
     server_addr.sin_family = AF_INET;                 // Address family to use
     server_addr.sin_port = htons(PORT_NUM);           // Port num to use
-    server_addr.sin_addr.s_addr = inet_addr(IP_ADDR); // IP address to use
+    server_addr.sin_addr.s_addr = inet_addr(server_ip); // IP address to use
     retcode = connect(client_s, (struct sockaddr *)&server_addr,
         sizeof(server_addr));
     if (retcode < 0)
@@ -360,7 +368,7 @@ bool knock_port(int port, byte key[], byte iv[])
 
     server_addr.sin_family = AF_INET;                 // Address family to use
     server_addr.sin_port = htons(port);               // Port num to use
-    server_addr.sin_addr.s_addr = inet_addr(IP_ADDR); // IP address to use
+    server_addr.sin_addr.s_addr = inet_addr(server_ip); // IP address to use
 
     // TODO: Encrypt port number using key
     secure_string plain_text = to_string(port).c_str();
