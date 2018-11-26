@@ -110,7 +110,7 @@ typedef std::basic_string<char, std::char_traits<char>, zallocator<char> > secur
 
 
 //----- Defines -------------------------------------------------------------
-#define PORT_NUM 2370			// arbitrary port number
+#define PORT_NUM 2377		// arbitrary port number
 #define IP_ADDR  "127.0.0.1"	// TODO: make command line arg for server IP
 #define DIFFIE_P 47          	// arbitrary "large" number
 #define DIFFIE_G 7           	// arbitrary smaller number
@@ -147,8 +147,9 @@ struct connection_info {    // Needed to pass multiple args to new thread
 using namespace std;
 using EVP_CIPHER_CTX_free_ptr = unique_ptr<EVP_CIPHER_CTX, decltype(&::EVP_CIPHER_CTX_free)>;
 
+bool verbose = false;
 //===== Main program ========================================================
-int main()
+int main(int argc, char * argv[])
 {
 #ifdef WIN
     WORD wVersionRequested = MAKEWORD(1,1);       // Stuff for WSA functions
@@ -164,6 +165,10 @@ int main()
 #ifdef WIN
     WSAStartup(wVersionRequested, &wsaData);
 #endif
+
+    if (argv[1]){
+      verbose = true;
+    }
 
     // Create initial socket
     client_s = socket(AF_INET, SOCK_STREAM, 0);
@@ -274,6 +279,14 @@ long long int create_shared_secret(int client_s)
     stream = stringstream(reply);
     stream >> x;
 
+    if (verbose){
+      printf("Sending x: ");
+      for (int i = 0; i<strlen(c_pkt); i++){
+        printf("%02X", c_pkt[i]);
+      }
+      printf("\n");
+    }
+
     // Send x
     retcode = send(client_s, c_pkt, (strlen(c_pkt) + 1), 0);
     if(retcode < 0)
@@ -352,7 +365,13 @@ bool knock_port(int port)
     // TODO: Encrypt port number using key
     strcpy(out_buf, to_string(port).c_str());
 
-
+    if (verbose){
+      printf("Sending knock: ");
+      for (int i = 0; i<strlen(out_buf); i++){
+        printf("%02X", out_buf[i]);
+      }
+      printf("\n");
+    }
     // Send knock packet to port
     retcode = sendto(client_s, out_buf, (strlen(out_buf) + 1), 0,
         (struct sockaddr *)&server_addr, sizeof(server_addr));

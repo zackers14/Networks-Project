@@ -46,12 +46,18 @@
     #include <pthread.h>        // for threads
     #include <unistd.h>
     #include <sys/wait.h>
+    #include <sys/ipc.h>
+    #include <sys/shm.h>
+    #include <semaphore.h>
 #endif
 
 //----- Defines -------------------------------------------------------------
 #define PORT_NUM 2377		// arbitrary port number
+#define WEBLITE_PORT 8093
+#define WEBLITE_ADDR "127.0.0.1"
 #define DIFFIE_P 47          	// arbitrary "large" number
 #define DIFFIE_G 7           	// arbitrary smaller number
+#define SHMKEY ((key_t) 9999) //Shared memory key number
 
 //----- Constants -----------------------------------------------------------
 static const unsigned int KEY_SIZE = 32;
@@ -156,12 +162,11 @@ struct connection_info {    // Needed to pass multiple args to new thread
 using namespace std;
 using EVP_CIPHER_CTX_free_ptr = unique_ptr<EVP_CIPHER_CTX, decltype(&::EVP_CIPHER_CTX_free)>;
 
-//----- Global variables ----------------------------------------------------
+bool verbose = false;
 unordered_map<char *, int> ip_addresses;
 set<int> ports_in_use;
-
 //===== Main program ========================================================
-int main() // TODO: Command line args for 'verbose mode' and webserver file
+int main(int argc, char * argv[]) // TODO: Command line args for 'verbose mode' and webserver file
 {
 #ifdef WIN
     WORD wVersionRequested = MAKEWORD(1,1);
@@ -181,11 +186,15 @@ int main() // TODO: Command line args for 'verbose mode' and webserver file
 #ifdef BSD
     socklen_t           addr_len;
     pthread_t           thread_id;      // Thread ID
-      signal(SIGQUIT, sigquit);
+    signal(SIGQUIT, sigquit);
 #endif
 #ifdef WIN
     WSAStartup(wVersionRequested, &wsaData);
 #endif
+
+    if (argv[1]){
+      verbose = true;
+    }
 
     // Create server socket
     server_s = socket(AF_INET, SOCK_STREAM, 0);
@@ -267,12 +276,13 @@ void *handle_connection(void *in_args)
 #endif
 {
     char out_buf[4096];
+    char in_buf[4096];
 
 	int client_s = ((struct connection_info *) in_args)->client_socket;
     struct sockaddr_in client_addr = ((struct connection_info *) in_args)->client_addr;
-    //struct in_addr client_ip;
+    struct in_addr client_ip;
 
-    //memcpy(&client_ip, &client_addr.sin_addr.s_addr, 4);
+    memcpy(&client_ip, &client_addr.sin_addr.s_addr, 4);
 
     // Load Cipher
     EVP_add_cipher(EVP_aes_256_cbc());
@@ -310,6 +320,13 @@ void *handle_connection(void *in_args)
 
     // Send packet to client
     const char * c_pkt = packet.c_str();
+    if (verbose){
+      printf("Sending: ");
+      for (int i = 0; i<strlen(c_pkt); i++){
+        printf("%02X", c_pkt[i]);
+      }
+      printf("\n");
+    }
     int retcode = send(client_s, c_pkt, (strlen(c_pkt) + 1), 0);
     if (retcode < 0)
     {
@@ -340,13 +357,78 @@ void *handle_connection(void *in_args)
     }
 pid_t proc;
 int status;
+char * ip = inet_ntoa(client_ip);
 
 if (proc = fork() == 0 ){
   execute_with_timer();
 } else{
-  
+  waitpid(proc, &status, 0);
+  /*int weblite;
+  struct sockaddr_in weblitesock;
+
+  //intialize weblite socket parameters
+  weblitesock.sin_family = AF_INET;
+  weblitesock.sin_port = htons(WEBLITE_PORT);
+  weblitesock.sin_addr.s_addr = inet_addr(WEBLITE_ADDR);
+  while (waitpid(proc, &status, WNOHANG) == 0){
+    // Begin receiving HTTP requests from client
+    retcode = recv(client_s, in_buf, sizeof(in_buf), 0);
+    if (retcode < 0)
+    {
+        printf("*** ERROR - recv() http request failed \n");
+        exit(-1);
+    }
+
+    //decrypt request
+    packet = in_buf;
+
+    aes_decrypt(key_bytes, iv_bytes, packet, recovered_text);
+
+    c_pkt = recovered_text.c_str();
+    // Create weblite socket
+    weblite = socket(AF_INET, SOCK_STREAM, 0);
+    if (weblite < 0){
+      printf("*** ERROR - Weblite socket failed \n");
+      exit(-1);
+    }
+    //connect to weblite
+    retcode = connect(weblite, (struct sockaddr *)&weblitesock,
+        sizeof(weblitesock));
+      if (retcode < 0)
+      {
+          printf("*** ERROR - connect() failed \n");
+          exit(-1);
+      }
+      //Send HTTP request to weblite
+      int retcode = send(weblite, c_pkt, (strlen(c_pkt) + 1), 0);
+      if (retcode < 0)
+      {
+          printf("*** ERROR - sendto() failed \n");
+          exit(-1);
+      }
+      //Receive file information from weblite
+      retcode = recv(weblite, in_buf, sizeof(in_buf), 0);
+      if (retcode < 0)
+      {
+          printf("*** ERROR - recv() failed \n");
+          exit(-1);
+      }
+
+      //encrypt information
+      plain_text = in_buf;
+      aes_encrypt(key_bytes, iv_bytes, plain_text, packet);
+
+      c_pkt = packet.c_str();
+      //Send encrypted information
+      retcode = send(client_s, c_pkt, (strlen(c_pkt) + 1), 0);
+      if (retcode < 0)
+      {
+          printf("*** ERROR - sendto() failed \n");
+          exit(-1);
+      }
+    }*/
 }
-    // TODO: if all succeed, launch weblite, send client encrypted server port
+
 
 }
 
@@ -362,7 +444,8 @@ bool ip_verified(in_addr client_ip)
         ? 1 : ip_addresses[ip] + 1;
 
     cout << "# Connect Attempts: " << ip_addresses[ip] << endl;
-    return (ip_addresses[ip] < 5); // TODO: Turn into a constant?
+
+    return (ip_addresses[ip] < 20); // TODO: Turn into a constant?
 }
 
 /* Uses Diffie-Hellman algorithm to create shared secret */
@@ -382,6 +465,14 @@ long long int create_shared_secret(int client_s)
     //const char * c_pkt = packet.c_str();
     char out_buff[4096];
     strcpy(out_buff, packet.c_str());
+
+    if (verbose){
+      printf("Sending x: ");
+      for (int i = 0; i<strlen(out_buff); i++){
+        printf("%02X", out_buff[i]);
+      }
+      printf("\n");
+    }
 
     // Send x
     retcode = send(client_s, out_buff, (strlen(out_buff) + 1), 0);
@@ -409,10 +500,12 @@ long long int create_shared_secret(int client_s)
 vector<int> generate_knock_sequence()
 {
      vector<int> ports;
+
      while(ports.size() < 3)
      {
          int port = rand() % 65000 + 10000; // random 5 digit port
          // check that port isn't in use already
+
          if (ports_in_use.find(port) == ports_in_use.end()) {
              ports.push_back(port);
              ports_in_use.insert(port);
@@ -618,7 +711,7 @@ vector<string> split(const string& s, char delim) {
 #ifdef BSD
 
 void execute_with_timer(){
-  signal(SIGINT, sigint);
+  //signal(SIGINT, sigint);
 
   int timeout = 10;
   pid_t pid;
@@ -656,7 +749,6 @@ void execute_with_timer(){
     } while (wpid == 0 && waittime <= timeout);
 
   }
-  printf("Exiting?\n");
 }
 
 void sigint(int sig){
