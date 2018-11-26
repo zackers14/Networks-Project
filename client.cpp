@@ -113,7 +113,7 @@ typedef std::basic_string<char, std::char_traits<char>, zallocator<char> > secur
 
 
 //----- Defines -------------------------------------------------------------
-#define PORT_NUM 2381		// arbitrary port number
+#define PORT_NUM 2383		// arbitrary port number
 //#define IP_ADDR  "127.0.0.1"	// TODO: make command line arg for server IP
 #define DIFFIE_P 47          	// arbitrary "large" number
 #define DIFFIE_G 7           	// arbitrary smaller number
@@ -206,7 +206,7 @@ int main(int argc, char * argv[])
 
     // Exchange shared secret
     key = create_shared_secret(client_s);
-    iv = create_shared_secret(client_s);
+    iv = key;
 
     byte key_bytes[KEY_SIZE];
     byte iv_bytes[BLOCK_SIZE];
@@ -479,19 +479,19 @@ void gen_params(byte key[], byte iv[], long long int k, long long int i)
     string k_string = to_string(k);
     string i_string = to_string(i);
 
-    char const *k_byte = k_string.c_str();
-    char const *i_byte = i_string.c_str();
+    //char const *k_byte = k_string.c_str();
+    //char const *i_byte = i_string.c_str();
 
     for (int j = 0; j < KEY_SIZE; j++){
-      if (j < sizeof(k_byte)){
-        key[j] = k_byte[j];
+      if (j < k_string.length() && k_string[j] > '0' && k_string[j] <= '9'){
+        key[j] = k_string[j];
       } else {
         key[j] = '0';
       }
     }
     for (int j = 0; j < BLOCK_SIZE; j++){
-      if (j < sizeof(i_byte) && i_byte[j] > '0' && i_byte[j] <= '9'){
-        iv[j] = i_byte[j];
+      if (j < i_string.length() && i_string[j] > '0' && i_string[j] <= '9'){
+        iv[j] = i_string[j];
       } else {
         iv[j] = '0';
       }

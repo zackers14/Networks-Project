@@ -55,7 +55,7 @@
 #endif
 
 //----- Defines -------------------------------------------------------------
-#define PORT_NUM 2381		// arbitrary port number
+#define PORT_NUM 2383		// arbitrary port number
 #define WEBLITE_PORT 8094
 #define WEBLITE_ADDR "127.0.0.1"
 #define DIFFIE_P 47          	// arbitrary "large" number
@@ -334,7 +334,7 @@ void *handle_connection(void *in_args)
 
     // Make unique shared secret
     long long int key = create_shared_secret(client_s);
-    long long int iv = create_shared_secret(client_s);
+    long long int iv = key;
 
     byte key_bytes[KEY_SIZE];
     byte iv_bytes[BLOCK_SIZE];
@@ -474,7 +474,7 @@ vector<int> generate_knock_sequence()
 
      while(ports.size() < 3)
      {
-         int port = rand() % 65000 + 10000; // random 5 digit port
+         int port = rand() % 55000 + 10000; // random 5 digit port
          // check that port isn't in use already
 
          if (ports_in_use.find(port) == ports_in_use.end()) {
@@ -589,7 +589,7 @@ long long int power(long long int a, long long int b)
 
 
 // Encrypts using AES, lifted from OpenSSL example
-void aes_encrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ptext, secure_string& ctext)
+void aes_encrypt(const byte key[], const byte iv[], const secure_string& ptext, secure_string& ctext)
 {
     EVP_CIPHER_CTX_free_ptr ctx(EVP_CIPHER_CTX_new(), ::EVP_CIPHER_CTX_free);
     int rc = EVP_EncryptInit_ex(ctx.get(), EVP_aes_256_cbc(), NULL, key, iv);
@@ -641,25 +641,25 @@ void aes_decrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secu
 // Generates Key and IV for AES
 void gen_params(byte key[], byte iv[], long long int k, long long int i)
 {
-    string k_string = to_string(k);
-    string i_string = to_string(i);
+  string k_string = to_string(k);
+  string i_string = to_string(i);
 
-    char const *k_byte = k_string.c_str();
-    char const *i_byte = i_string.c_str();
+  //char const *k_byte = k_string.c_str();
+  //char const *i_byte = i_string.c_str();
 
-    for (int j = 0; j < KEY_SIZE; j++){
-      if (j < sizeof(k_byte)){
-        key[j] = k_byte[j];
-      } else {
-        key[j] = '0';
-      }
+  for (int j = 0; j < KEY_SIZE; j++){
+    if (j < sizeof(k_string) && k_string[j] > '0' && k_string[j] <= '9'){
+      key[j] = k_string[j];
+    } else {
+      key[j] = '0';
     }
-    for (int j = 0; j < BLOCK_SIZE; j++){
-      if (j < sizeof(i_byte) && i_byte[j] > '0' && i_byte[j] <= '9'){
-        iv[j] = i_byte[j];
-      } else {
-        iv[j] = '0';
-      }
+  }
+  for (int j = 0; j < BLOCK_SIZE; j++){
+    if (j < sizeof(i_string) && i_string[j] > '0' && i_string[j] <= '9'){
+      iv[j] = i_string[j];
+    } else {
+      iv[j] = '0';
+    }
     }
     /*int rc = RAND_bytes(key, KEY_SIZE);
     if (rc != 1)
