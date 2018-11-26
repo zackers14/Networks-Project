@@ -110,7 +110,7 @@ typedef std::basic_string<char, std::char_traits<char>, zallocator<char> > secur
 
 
 //----- Defines -------------------------------------------------------------
-#define PORT_NUM 2377		// arbitrary port number
+#define PORT_NUM 2378		// arbitrary port number
 #define IP_ADDR  "127.0.0.1"	// TODO: make command line arg for server IP
 #define DIFFIE_P 47          	// arbitrary "large" number
 #define DIFFIE_G 7           	// arbitrary smaller number
@@ -121,7 +121,7 @@ using namespace std;
 long long int   create_shared_secret(int client_s);
 long long int   power(long long int a, long long int b);
 vector<int>     parse_ports(string port_pkt, int num_ports);
-bool            knock_port(int port);
+bool            knock_port(int port, byte[], byte[]);
 void gen_params(byte key[KEY_SIZE], byte iv[BLOCK_SIZE],long long int, long long int);
 void aes_encrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ptext, secure_string& ctext);
 void aes_decrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ctext, secure_string& rtext);
@@ -229,7 +229,7 @@ int main(int argc, char * argv[])
 
     for (int port : ports)
     {
-        if(!knock_port(port))
+        if(!knock_port(port, key_bytes, iv_bytes))
         {
             cout << "*** ERROR - failed to knock port " << port << endl;
             exit(-1);
@@ -327,7 +327,7 @@ vector<int> parse_ports(string port_pkt, int num_ports)
 }
 
 /* Creates UDP socket to knock "port". Returns true if successful. */
-bool knock_port(int port)
+bool knock_port(int port, byte key[], byte iv[])
 {
 #ifdef WIN
     WORD wVersionRequested = MAKEWORD(1,1);       // Stuff for WSA functions
@@ -363,17 +363,30 @@ bool knock_port(int port)
     server_addr.sin_addr.s_addr = inet_addr(IP_ADDR); // IP address to use
 
     // TODO: Encrypt port number using key
-    strcpy(out_buf, to_string(port).c_str());
+    secure_string plain_text = to_string(port).c_str();
+    secure_string packet, recovered_text;
+
+    // TODO: Encrypt packet using key
+
+    aes_encrypt(key, iv, plain_text, packet);
+    //aes_decrypt(key_bytes, iv_bytes, packet, recovered_text);
+    //byte key[KEY_SIZE], iv[BLOCK_SIZE];
+    //gen_params(key, iv);
+
+    //aes_encrypt(key, iv, plain_text, packet);
+
+    // Send packet to client
+    const char * c_pkt = packet.c_str();
 
     if (verbose){
       printf("Sending knock: ");
-      for (int i = 0; i<strlen(out_buf); i++){
-        printf("%02X", out_buf[i]);
+      for (int i = 0; i<strlen(c_pkt); i++){
+        printf("%02X", c_pkt[i]);
       }
       printf("\n");
     }
     // Send knock packet to port
-    retcode = sendto(client_s, out_buf, (strlen(out_buf) + 1), 0,
+    retcode = sendto(client_s, c_pkt, (strlen(c_pkt) + 1), 0,
         (struct sockaddr *)&server_addr, sizeof(server_addr));
     if (retcode < 0)
     {

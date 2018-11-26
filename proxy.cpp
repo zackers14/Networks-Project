@@ -52,7 +52,7 @@
 #endif
 
 //----- Defines -------------------------------------------------------------
-#define PORT_NUM 2377		// arbitrary port number
+#define PORT_NUM 2378		// arbitrary port number
 #define WEBLITE_PORT 8093
 #define WEBLITE_ADDR "127.0.0.1"
 #define DIFFIE_P 47          	// arbitrary "large" number
@@ -128,7 +128,7 @@ typedef std::basic_string<char, std::char_traits<char>, zallocator<char> > secur
 
 //----- Function prototypes -------------------------------------------------
 bool            ip_verified(in_addr client_ip);
-bool            create_knock_socket(sockaddr_in client, int port_num);
+bool            create_knock_socket(sockaddr_in client, int port_num, byte[], byte[]);
 std::vector<int>generate_knock_sequence();
 std::vector<std::string> split(const std::string&, char);
 long long int   create_shared_secret(int client_s);
@@ -380,7 +380,7 @@ void *handle_connection(void *in_args)
     // Call create_knock_socket for each port
     for(int port : ports)
     {
-        if (!create_knock_socket(client_addr, port)) // knock failed
+        if (!create_knock_socket(client_addr, port, key_bytes, iv_bytes)) // knock failed
         {
             // send failure mesasage, close socket, terminate thread
             strcpy(out_buf, "Knock failed\n");
@@ -555,7 +555,7 @@ vector<int> generate_knock_sequence()
 }
 
 /* Creates new UDP socket listening on port_num for a knock */
-bool create_knock_socket(sockaddr_in client, int port_num)
+bool create_knock_socket(sockaddr_in client, int port_num, byte key[], byte iv[])
 {
     int retcode;
     int server_s;
@@ -607,7 +607,12 @@ bool create_knock_socket(sockaddr_in client, int port_num)
         inet_ntoa(client_ip_addr), ntohs(client_addr.sin_port));
 
     // TODO: Decrypt packet
-    string port_pkt(in_buf);
+    secure_string cipher_text, recovered_text;
+    cipher_text = in_buf;
+
+    aes_decrypt(key, iv, cipher_text, recovered_text);
+
+    string port_pkt = recovered_text.c_str();
 
     // If packet == port number, set success = true, else false;
     success = (stoi(port_pkt) == port_num) ? true : false;
