@@ -373,12 +373,17 @@ bool knock_port(int port, byte key[], byte iv[])
 
     secure_string plain_text = to_string(port).c_str();
     secure_string packet, recovered_text;
-
+    bool sizeflag = false;
+    const char * c_pkt;
     // Encrypt port number
-    aes_encrypt(key, iv, plain_text, packet);
-
+    while (!sizeflag){
+      aes_encrypt(key, iv, plain_text, packet);
+      c_pkt = packet.c_str();
+      printf("Port:%d, Size:%d \n", port, strlen(c_pkt));
+      sizeflag = true;
+    }
     // Send packet to client
-    const char * c_pkt = packet.c_str();
+
 
     if (verbose){
       printf("Sending knock: ");
@@ -388,7 +393,7 @@ bool knock_port(int port, byte key[], byte iv[])
       printf("\n");
     }
     // Send knock packet to port
-    retcode = sendto(client_s, c_pkt, (strlen(c_pkt) + 1), 0,
+    retcode = sendto(client_s, c_pkt, strlen(c_pkt), 0,
         (struct sockaddr *)&server_addr, sizeof(server_addr));
     if (retcode < 0)
     {
@@ -454,7 +459,7 @@ void aes_encrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secu
       throw std::runtime_error("EVP_EncryptFinal_ex failed");
 
     // Set cipher text size now that we know it
-    ctext.resize(out_len1 + out_len2);
+    ctext.resize(16);
 }
 
 // Decrypts using AES, lifted from OpenSSL example

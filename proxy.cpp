@@ -370,7 +370,7 @@ void *handle_connection(void *in_args)
       }
       printf("\n");
     }
-    int retcode = send(client_s, c_pkt, (strlen(c_pkt) + 1), 0);
+    int retcode = send(client_s, c_pkt, strlen(c_pkt), 0);
     if (retcode < 0)
     {
         printf("*** ERROR - sendto() failed \n");
@@ -625,7 +625,7 @@ void aes_encrypt(const byte key[], const byte iv[], const secure_string& ptext, 
       throw std::runtime_error("EVP_EncryptFinal_ex failed");
 
     // Set cipher text size now that we know it
-    ctext.resize(out_len1 + out_len2);
+    ctext.resize(16);
 }
 
 // Decrypts using AES, lifted from OpenSSL example
