@@ -3,7 +3,7 @@
 // WIN: g++ client.cpp -lws2_32 -o client
 // BSD: g++ client.cpp -lpthread -lssl -lcrypto -o client
 // --- Execution notes ---
-// BSD: ./client {verbose mode} {ip}
+// BSD: ./client {verbose mode} {ip} {port}
 //                    0/1
 //============================================================================
 
@@ -113,7 +113,7 @@ typedef std::basic_string<char, std::char_traits<char>, zallocator<char> > secur
 
 
 //----- Defines -------------------------------------------------------------
-#define PORT_NUM 2383		// arbitrary port number
+//#define PORT_NUM 2383		// arbitrary port number
 //#define IP_ADDR  "127.0.0.1"	// TODO: make command line arg for server IP
 #define DIFFIE_P 47          	// arbitrary "large" number
 #define DIFFIE_G 7           	// arbitrary smaller number
@@ -152,6 +152,7 @@ using EVP_CIPHER_CTX_free_ptr = unique_ptr<EVP_CIPHER_CTX, decltype(&::EVP_CIPHE
 
 char * server_ip;
 bool verbose = false;
+int server_port;
 //===== Main program ========================================================
 int main(int argc, char * argv[])
 {
@@ -170,7 +171,7 @@ int main(int argc, char * argv[])
     WSAStartup(wVersionRequested, &wsaData);
 #endif
 
-    if (argc != 3){
+    if (argc != 4){
       printf("*** ERROR - invalid number of arguments \n");
       exit(-1);
     }
@@ -180,7 +181,7 @@ int main(int argc, char * argv[])
     }
 
     server_ip = argv[2];
-
+    server_port = stoi(argv[3]);
     // Create initial socket
     client_s = socket(AF_INET, SOCK_STREAM, 0);
     if (client_s < 0)
@@ -191,7 +192,7 @@ int main(int argc, char * argv[])
 
     // Perform initial connection to server
     server_addr.sin_family = AF_INET;                 // Address family to use
-    server_addr.sin_port = htons(PORT_NUM);           // Port num to use
+    server_addr.sin_port = htons(server_port);           // Port num to use
     server_addr.sin_addr.s_addr = inet_addr(server_ip); // IP address to use
     retcode = connect(client_s, (struct sockaddr *)&server_addr,
         sizeof(server_addr));
@@ -221,6 +222,14 @@ int main(int argc, char * argv[])
     {
         printf("*** ERROR - recv() failed \n");
         exit(-1);
+    }
+
+    if (verbose){
+      printf("Receiving ports: ");
+      for (int i = 0; i<strlen(in_buf); i++){
+        printf("%02X", in_buf[i]);
+      }
+      printf("\n");
     }
     // TODO: Unencrypt ports
 

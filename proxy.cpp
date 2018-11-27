@@ -178,7 +178,7 @@ unordered_map<char *, int> ip_addresses;
 set<int> ports_in_use;
 shared_mem *wait_struc;
 sem_t mutex;
-
+int server_port;
 //===== Main program ========================================================
 int main(int argc, char * argv[]) // TODO: Command line args for 'verbose mode' and webserver file
 {
@@ -208,9 +208,16 @@ int main(int argc, char * argv[]) // TODO: Command line args for 'verbose mode' 
     WSAStartup(wVersionRequested, &wsaData);
 #endif
 
+    if (argc != 3){
+      printf("*** ERROR - invalid number of arguments \n");
+      exit(-1);
+    }
+
     if (*argv[1] == '1'){
       verbose = true;
     }
+
+    server_port = stoi(argv[2]);
 
     //Initialize necessary variables for shared memory
     char * shmadd;
@@ -249,7 +256,7 @@ int main(int argc, char * argv[]) // TODO: Command line args for 'verbose mode' 
 
     // Bind to PORT_NUM
     server_addr.sin_family = AF_INET;                 // Address family to use
-    server_addr.sin_port = htons(PORT_NUM);
+    server_addr.sin_port = htons(server_port);
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
     retcode = bind(server_s, (struct sockaddr *)&server_addr,
@@ -260,7 +267,7 @@ int main(int argc, char * argv[]) // TODO: Command line args for 'verbose mode' 
         exit(-1);
     }
 
-    printf(">>> Listening on port %d <<<\n", PORT_NUM);
+    printf(">>> Listening on port %d <<<\n", server_port);
     if (listen(server_s, 100) < 0) {
         perror("listen");
         exit(EXIT_FAILURE);
@@ -531,6 +538,14 @@ bool create_knock_socket(sockaddr_in client, int port_num, byte key[], byte iv[]
     {
         printf("*** ERROR - recvfrom() failed \n");
         exit(-1);
+    }
+
+    if (verbose){
+      printf("Receiving port: ");
+      for (int i = 0; i<strlen(in_buf); i++){
+        printf("%02X", in_buf[i]);
+      }
+      printf("\n");
     }
 
     memcpy(&client_ip_addr, &client_addr.sin_addr.s_addr, 4);
