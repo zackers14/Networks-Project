@@ -459,7 +459,7 @@ void aes_encrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secu
       throw std::runtime_error("EVP_EncryptFinal_ex failed");
 
     // Set cipher text size now that we know it
-    ctext.resize(16);
+    ctext.resize(out_len1 + out_len2);
 }
 
 // Decrypts using AES, lifted from OpenSSL example
